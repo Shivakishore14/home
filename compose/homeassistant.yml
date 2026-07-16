@@ -1,0 +1,32 @@
+# ==============================================================================
+# Home Assistant Core Service Definition
+# ==============================================================================
+
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:${HOMEASSISTANT_VERSION:-stable}
+    container_name: homeassistant
+    restart: unless-stopped
+    ports:
+      - "${HOMEASSISTANT_PORT:-8123}:8123"
+    volumes:
+      # Persistent configuration directory (on external drive)
+      - "${DOCKER_DIR}/homeassistant:/config"
+      # Sync local time from host
+      - "/etc/localtime:/etc/localtime:ro"
+    networks:
+      - home-network
+    environment:
+      - TZ=${TZ:-UTC}
+    healthcheck:
+      # Verify HA is responding on the primary web interface
+      test: ["CMD-SHELL", "curl -f http://localhost:8123/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

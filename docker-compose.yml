@@ -1,0 +1,17 @@
+# ==============================================================================
+# Root Docker Compose Base Configuration
+# ==============================================================================
+# This is the base entry point. Since Docker Compose versions < 2.20.0 do not
+# support the 'include' directive, we use the standard COMPOSE_FILE merge feature
+# defined in the '.env' file.
+#
+# To manage services, Docker Compose automatically reads the COMPOSE_FILE variable
+# from '.env' and merges this base file with the files in 'compose/'.
+# ==============================================================================
+
+version: "3.8"
+
+networks:
+  home-network:
+    name: home-network
+    driver: bridge

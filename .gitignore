@@ -1,0 +1,25 @@
+# ==============================================================================
+# Git Ignored Files
+# ==============================================================================
+
+# Local environment configuration (contains sensitive settings/paths)
+.env
+
+# Backup archives (avoid committing large tar.gz files to git)
+backups/*.tar.gz
+backups/
+
+# macOS Finder files
+.DS_Store
+
+# IDE / Editor configurations
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Logs
+*.log
