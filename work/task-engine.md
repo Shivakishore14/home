@@ -331,3 +331,31 @@ home/
    - Added Makefile automation for server, worker, reload, status, e2e, and cross-compilation (`make taskengine-release`).
    - Cross-compiled binaries for macOS (ARM64/Intel) and Linux (x86_64/ARM64).
    - Created comprehensive documentation manual in [docs/taskengine.md](file:///Users/server/github/home/docs/taskengine.md) and updated [README.md](file:///Users/server/github/home/README.md).
+
+---
+
+## 🔮 Future Extensions & Planned Enhancements
+
+### 1. 🌐 Dedicated Multi-Host Topology & Webhook Integrations
+* **Decoupled Architecture**: 
+  * **Media / Storage Node**: Dedicated Jellyfin server and NAS storage.
+  * **Control Plane Node**: Mac mini running TaskEngine server & SQLite queue.
+  * **Compute Farm**: MacBook Air (VideoToolbox), Desktop PC (NVENC GPU), and cloud instances.
+* **Jellyfin / Arr Webhook Bridges**:
+  * **Ingress Webhook**: Sonarr/Radarr triggers `POST /api/v1/tasks` immediately upon download completion to prioritize new media.
+  * **Egress Webhook**: TaskEngine calls Jellyfin API (`/Library/Refresh`) automatically after atomically writing clean `.mp4` and `.transcode_cache`.
+
+### 2. ⚡ Generic IoT & Embedded Microcontroller Workers
+* **Zero-Dependency REST Protocol**: Any micro-device capable of making HTTP requests can join the worker pool.
+* **Supported Frameworks**: MicroPython, CircuitPython, Arduino C++, ESP-IDF.
+* **Hardware Automation Targets**:
+  * **Smart Irrigation & Relays**: ESP32 claiming cron-scheduled valve/pump tasks.
+  * **Sensor Telemetry**: ESP32 / Pico W reading temperature, humidity, air quality sensors (BME280, SCD40) and logging telemetry back in task completion payloads.
+  * **Camera Snapshots**: ESP32-CAM capturing scheduled security / garden snapshots.
+
+### 3. 🔋 Battery & Thermal-Aware Compute Scheduling
+* Allow mobile laptop workers (e.g. MacBook Air on battery) to report battery level and power source in heartbeats.
+* Server automatically suspends dispatching heavy video-transcode jobs to laptops running on battery power and resumes when plugged into AC power.
+
+### 4. 📢 Alerting & Notifications
+* Built-in Discord, Telegram, or Pushover webhook alerts for task failures or critical system metrics.

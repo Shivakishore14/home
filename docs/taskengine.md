@@ -249,5 +249,24 @@ make taskengine-release
 Outputs in `src/taskengine/bin/`:
 * `taskengine_darwin_arm64` — macOS Apple Silicon (M1/M2/M3/M4)
 * `taskengine_darwin_amd64` — macOS Intel
-* `taskengine_linux_amd64` — Linux x86_64
-* `taskengine_linux_arm64` — Linux ARM64 (Raspberry Pi, Cloud ARM instances)
+* `taskengine_linux_arm64` — Linux ARM64 (Raspberry Pi 4/5, AWS Graviton)
+* `taskengine_linux_amd64` — Linux x86_64 (Servers, VMs, Synology/TrueNAS)
+
+---
+
+## 🔮 Future Extensions & Roadmap
+
+### 1. 🌐 Dedicated Multi-Host Topology & Webhooks
+* **Decoupled Architecture**: Media/Jellyfin server running on a separate host, TaskEngine server on Mac mini, and workers distributed across laptops, PCs, and microcontrollers.
+* **Webhook Integration**:
+  * Ingress: Sonarr/Radarr triggers tasks immediately upon new media arrival.
+  * Egress: Automatically calls Jellyfin `/Library/Refresh` API when video transcoding completes.
+
+### 2. ⚡ Generic IoT / Microcontroller Workers
+* Pure HTTP/JSON worker protocol allows ESP32, Raspberry Pi Pico W, and Arduino devices to act as distributed workers for:
+  * Scheduled garden irrigation and relay switching.
+  * Environment sensor telemetry collection (BME280, SCD40, DHT22).
+  * ESP32-CAM periodic photo capture.
+
+### 3. 🔋 Battery-Aware Scheduling
+* Dynamic throttling of heavy video transcoding jobs when worker laptops are on battery power.
