@@ -41,6 +41,8 @@ type GlobalConfig struct {
 type WorkerConfig struct {
 	WorkerID           string                 `yaml:"worker_id"`
 	MaxConcurrentTasks int                    `yaml:"max_concurrent_tasks"`
+	EnabledPlugins     []string               `yaml:"enabled_plugins"`
+	ScratchDir         string                 `yaml:"scratch_dir"`
 	PathMappings       map[string]string      `yaml:"path_mappings"`
 	PluginConfigs      map[string]interface{} `yaml:"plugin_configs"`
 }
@@ -223,6 +225,12 @@ func (m *Manager) GetWorkerConfig(workerID string) WorkerConfig {
 	if w, ok := m.workers[workerID]; ok {
 		if w.MaxConcurrentTasks > 0 {
 			res.MaxConcurrentTasks = w.MaxConcurrentTasks
+		}
+		if len(w.EnabledPlugins) > 0 {
+			res.EnabledPlugins = w.EnabledPlugins
+		}
+		if w.ScratchDir != "" {
+			res.ScratchDir = w.ScratchDir
 		}
 		for k, v := range w.PathMappings {
 			res.PathMappings[k] = v

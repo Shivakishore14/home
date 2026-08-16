@@ -109,6 +109,8 @@ WORKER_ID ?=
 CONCURRENCY ?= 0
 PORT ?= 8080
 
+PLUGINS ?=
+
 .PHONY: taskengine-ensure-bin
 taskengine-ensure-bin:
 	@$(MAKE) -C src/taskengine ensure-bin SERVER_URL=$(SERVER_URL)
@@ -132,6 +134,7 @@ taskengine-worker: taskengine-ensure-bin
 	@ARGS="--server-url $(SERVER_URL)"; \
 	if [ -n "$(WORKER_ID)" ]; then ARGS="$$ARGS --worker-id $(WORKER_ID)"; fi; \
 	if [ "$(CONCURRENCY)" -gt 0 ]; then ARGS="$$ARGS --concurrency $(CONCURRENCY)"; fi; \
+	if [ -n "$(PLUGINS)" ]; then ARGS="$$ARGS --plugins $(PLUGINS)"; fi; \
 	./src/taskengine/bin/taskengine worker $$ARGS
 
 .PHONY: taskengine-reload

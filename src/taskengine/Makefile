@@ -68,6 +68,7 @@ run-worker: ensure-bin
 	@ARGS="--server-url $(SERVER_URL)"; \
 	if [ -n "$(WORKER_ID)" ]; then ARGS="$$ARGS --worker-id $(WORKER_ID)"; fi; \
 	if [ "$(CONCURRENCY)" -gt 0 ]; then ARGS="$$ARGS --concurrency $(CONCURRENCY)"; fi; \
+	if [ -n "$(PLUGINS)" ]; then ARGS="$$ARGS --plugins $(PLUGINS)"; fi; \
 	./$(BINARY_NAME) worker $$ARGS
 
 reload: ensure-bin

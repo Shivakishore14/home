@@ -96,3 +96,25 @@ defaults:
 		t.Errorf("expected workerID 'test-worker-1', got %s", finalTask.WorkerID)
 	}
 }
+
+func TestWorkerPathTranslation(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "/Users/test"
+	}
+
+	w := &Worker{
+		effectiveConfig: models.RegisterWorkerResponse{
+			PathMappings: map[string]string{
+				"/Volumes/drive001/media": "~/Desktop/macmini_media",
+			},
+		},
+	}
+
+	translated := w.translatePath("/Volumes/drive001/media/Movies/avatar.mkv")
+	expected := filepath.Join(home, "Desktop/macmini_media/Movies/avatar.mkv")
+
+	if translated != expected {
+		t.Errorf("expected translated path %q, got %q", expected, translated)
+	}
+}

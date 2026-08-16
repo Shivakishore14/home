@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -142,6 +143,7 @@ func runWorker(args []string) {
 	serverShort := fs.String("server", "", "Alias for --server-url")
 	workerID := fs.String("worker-id", "", "Unique worker identifier (defaults to hostname)")
 	concurrency := fs.Int("concurrency", 0, "Max concurrent task executions (overrides server defaults)")
+	plugins := fs.String("plugins", "", "Comma-separated list of enabled plugins (e.g. video-transcoder,command-runner)")
 	pollInterval := fs.Duration("poll-interval", 2*time.Second, "Task polling interval")
 
 	_ = fs.Parse(args)
@@ -156,11 +158,22 @@ func runWorker(args []string) {
 		os.Exit(1)
 	}
 
+	var enabledPlugins []string
+	if *plugins != "" {
+		for _, p := range strings.Split(*plugins, ",") {
+			trimmed := strings.TrimSpace(p)
+			if trimmed != "" {
+				enabledPlugins = append(enabledPlugins, trimmed)
+			}
+		}
+	}
+
 	w := worker.NewWorker(worker.Config{
-		ServerURL:    targetURL,
-		WorkerID:     *workerID,
-		Concurrency:  *concurrency,
-		PollInterval: *pollInterval,
+		ServerURL:      targetURL,
+		WorkerID:       *workerID,
+		Concurrency:    *concurrency,
+		EnabledPlugins: enabledPlugins,
+		PollInterval:   *pollInterval,
 	}, plugin.DefaultRegistry)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

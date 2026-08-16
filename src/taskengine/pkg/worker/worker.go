@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,11 +19,12 @@ import (
 
 // Config configures worker daemon operation.
 type Config struct {
-	ServerURL    string
-	WorkerID     string
-	Hostname     string
-	PollInterval time.Duration
-	Concurrency  int
+	ServerURL      string
+	WorkerID       string
+	Hostname       string
+	PollInterval   time.Duration
+	Concurrency    int
+	EnabledPlugins []string
 }
 
 // Worker handles task polling, execution, and heartbeats.
@@ -29,6 +32,7 @@ type Worker struct {
 	cfg             Config
 	client          *http.Client
 	registry        *plugin.Registry
+	enabledPlugins  []string
 	effectiveConfig models.RegisterWorkerResponse
 	stopChan        chan struct{}
 	wg              sync.WaitGroup
@@ -51,11 +55,17 @@ func NewWorker(cfg Config, registry *plugin.Registry) *Worker {
 		cfg.PollInterval = 2 * time.Second
 	}
 
+	enabledPlugins := cfg.EnabledPlugins
+	if len(enabledPlugins) == 0 {
+		enabledPlugins = registry.EnabledWorkerPlugins()
+	}
+
 	return &Worker{
-		cfg:      cfg,
-		client:   &http.Client{Timeout: 30 * time.Second},
-		registry: registry,
-		stopChan: make(chan struct{}),
+		cfg:            cfg,
+		client:         &http.Client{Timeout: 30 * time.Second},
+		registry:       registry,
+		enabledPlugins: enabledPlugins,
+		stopChan:       make(chan struct{}),
 	}
 }
 
@@ -106,11 +116,10 @@ func (w *Worker) Stop() {
 }
 
 func (w *Worker) register(ctx context.Context) error {
-	plugins := w.registry.EnabledWorkerPlugins()
 	reqBody := models.RegisterWorkerRequest{
 		WorkerID:       w.cfg.WorkerID,
 		Hostname:       w.cfg.Hostname,
-		EnabledPlugins: plugins,
+		EnabledPlugins: w.enabledPlugins,
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -137,6 +146,10 @@ func (w *Worker) register(ctx context.Context) error {
 
 	if err := json.NewDecoder(resp.Body).Decode(&w.effectiveConfig); err != nil {
 		return fmt.Errorf("failed to decode register response: %w", err)
+	}
+
+	if len(w.effectiveConfig.EnabledPlugins) > 0 {
+		w.enabledPlugins = w.effectiveConfig.EnabledPlugins
 	}
 
 	// Initialize plugins with server-provided worker overrides
@@ -213,14 +226,13 @@ func (w *Worker) pollLoop(ctx context.Context) {
 }
 
 func (w *Worker) claimTask(ctx context.Context) (*models.Task, error) {
-	plugins := w.registry.EnabledWorkerPlugins()
-	if len(plugins) == 0 {
+	if len(w.enabledPlugins) == 0 {
 		return nil, nil
 	}
 
 	reqBody := models.ClaimTaskRequest{
 		WorkerID: w.cfg.WorkerID,
-		Plugins:  plugins,
+		Plugins:  w.enabledPlugins,
 	}
 
 	data, _ := json.Marshal(reqBody)
@@ -251,8 +263,60 @@ func (w *Worker) claimTask(ctx context.Context) (*models.Task, error) {
 	return &task, nil
 }
 
+func resolveHomePath(p string) string {
+	if p == "" {
+		return ""
+	}
+	if strings.HasPrefix(p, "~/") || p == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			trimmed := strings.TrimPrefix(p, "~")
+			trimmed = strings.TrimPrefix(trimmed, "/")
+			return filepath.Join(home, trimmed)
+		}
+	}
+	return p
+}
+
+func (w *Worker) translatePath(serverPath string) string {
+	if serverPath == "" {
+		return ""
+	}
+
+	var bestMatchKey string
+	var bestMatchVal string
+
+	for serverPrefix, workerPrefix := range w.effectiveConfig.PathMappings {
+		cleanedServerPrefix := filepath.Clean(serverPrefix)
+		cleanedServerPath := filepath.Clean(serverPath)
+
+		if strings.HasPrefix(cleanedServerPath, cleanedServerPrefix) {
+			if len(cleanedServerPrefix) > len(bestMatchKey) {
+				bestMatchKey = cleanedServerPrefix
+				bestMatchVal = workerPrefix
+			}
+		}
+	}
+
+	if bestMatchKey != "" {
+		cleanedServerPath := filepath.Clean(serverPath)
+		relPath := strings.TrimPrefix(cleanedServerPath, bestMatchKey)
+		relPath = strings.TrimPrefix(relPath, string(filepath.Separator))
+		relPath = strings.TrimPrefix(relPath, "/")
+
+		resolvedWorkerPrefix := resolveHomePath(bestMatchVal)
+		return filepath.Join(resolvedWorkerPrefix, relPath)
+	}
+
+	return resolveHomePath(serverPath)
+}
+
 func (w *Worker) runTask(ctx context.Context, task *models.Task) {
-	log.Printf("[Worker %s] Running task %s (Plugin: %s, Target: %s)", w.cfg.WorkerID, task.ID, task.PluginName, task.TargetFile)
+	localTargetFile := w.translatePath(task.TargetFile)
+	if localTargetFile != task.TargetFile && task.TargetFile != "" {
+		log.Printf("[Worker %s] Running task %s (Plugin: %s, Target: %s -> %s)", w.cfg.WorkerID, task.ID, task.PluginName, task.TargetFile, localTargetFile)
+	} else {
+		log.Printf("[Worker %s] Running task %s (Plugin: %s, Target: %s)", w.cfg.WorkerID, task.ID, task.PluginName, task.TargetFile)
+	}
 
 	p, ok := w.registry.GetWorkerPlugin(task.PluginName)
 	if !ok {
@@ -269,11 +333,14 @@ func (w *Worker) runTask(ctx context.Context, task *models.Task) {
 	// Export runtime variables for plugins and scripts
 	os.Setenv("SERVER_URL", w.cfg.ServerURL)
 	os.Setenv("WORKER_ID", w.cfg.WorkerID)
+	if w.effectiveConfig.ScratchDir != "" {
+		os.Setenv("SCRATCH_DIR", w.effectiveConfig.ScratchDir)
+	}
 
 	payload := plugin.TaskPayload{
 		ID:         task.ID,
 		PluginName: task.PluginName,
-		TargetFile: task.TargetFile,
+		TargetFile: localTargetFile,
 		Params:     task.Payload,
 	}
 

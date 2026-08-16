@@ -220,14 +220,17 @@ func (s *Server) startTaskGenerators() {
 							continue
 						}
 						for _, item := range generated {
-							t, err := s.db.CreateTask(context.Background(), models.CreateTaskRequest{
-								PluginName: item.PluginName,
-								TargetFile: item.TargetFile,
-								Priority:   def.Priority,
-								Params:     item.Params,
-							})
-							if err == nil && t != nil {
-								s.Broadcast("task_created", t)
+							hasActive, err := s.db.HasPendingOrRunningTask(context.Background(), item.PluginName, item.TargetFile)
+							if err == nil && !hasActive {
+								t, err := s.db.CreateTask(context.Background(), models.CreateTaskRequest{
+									PluginName: item.PluginName,
+									TargetFile: item.TargetFile,
+									Priority:   def.Priority,
+									Params:     item.Params,
+								})
+								if err == nil && t != nil {
+									s.Broadcast("task_created", t)
+								}
 							}
 						}
 					} else {
@@ -320,6 +323,8 @@ func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 	resp := models.RegisterWorkerResponse{
 		WorkerID:           req.WorkerID,
 		MaxConcurrentTasks: wCfg.MaxConcurrentTasks,
+		EnabledPlugins:     wCfg.EnabledPlugins,
+		ScratchDir:         wCfg.ScratchDir,
 		PathMappings:       wCfg.PathMappings,
 		PluginConfigs:      wCfg.PluginConfigs,
 		HeartbeatInterval:  hbInterval,

@@ -1,13 +1,13 @@
-name: "video-transcode-incoming"
+name: "video-transcode-media"
 plugin_name: "video-transcoder"
-schedule: "*/30 * * * *"
-enabled: false
+schedule: "*/15 * * * *"
+enabled: true
 priority: 10
 scanner:
-  directory: "/Volumes/drive001/media/incoming"
-  target_extensions: [".mkv", ".mp4", ".mov", ".avi", ".ts", ".m2ts"]
-  exclude_patterns: ["*.transcoded.*", "*.temp.*"]
+  directory: "/Volumes/drive001/media"
+  target_extensions: [".mkv", ".mp4", ".mov", ".avi", ".ts", ".m2ts", ".wmv", ".flv"]
 params:
+  directory: "/Volumes/drive001/media"
   target_codec: "libx264"
   target_height: 1080
   crf: 21

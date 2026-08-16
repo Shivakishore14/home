@@ -61,6 +61,8 @@ type RegisterWorkerRequest struct {
 type RegisterWorkerResponse struct {
 	WorkerID           string                 `json:"worker_id"`
 	MaxConcurrentTasks int                    `json:"max_concurrent_tasks"`
+	EnabledPlugins     []string               `json:"enabled_plugins,omitempty"`
+	ScratchDir         string                 `json:"scratch_dir,omitempty"`
 	PathMappings       map[string]string      `json:"path_mappings"`
 	PluginConfigs      map[string]interface{} `json:"plugin_configs"`
 	HeartbeatInterval  int                    `json:"heartbeat_interval_seconds"`

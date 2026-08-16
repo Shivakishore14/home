@@ -148,6 +148,15 @@ Optimized for **Jellyfin 1080p Universal Direct Play** (100% Direct Play on Web,
 * **Video Profile**: H.264 High Profile Level 4.1, 8-bit `yuv420p` (`-crf 21 -preset medium`).
 * **Audio Profile**: AAC Stereo 2.0 @ 192 kbps (`-c:a aac -b:a 192k -ac 2`).
 * **Streaming Optimization**: `-movflags +faststart` for zero-buffer immediate start.
+* **Clean In-Place Replacement**: Encodes to `.temp.<base>.mp4`, deletes original, and atomically renames to clean `<base>.mp4` (no `.transcoded` suffix clutter in Jellyfin).
+* **Local SSD Scratch Buffering (`scratch_dir`)**:
+  * If `scratch_dir` is configured (e.g. `~/.taskengine/scratch`), the worker pulls the source file sequentially to its high-speed local NVMe SSD first.
+  * FFmpeg runs with 100% local I/O (zero network latency or HDD seek thrashing).
+  * Upon successful transcode, the clean `.mp4` is uploaded back to the media storage, the original file is deleted, `.transcode_cache` is updated, and the local scratch folder is cleaned up.
+* **Local Folder State Tracking (`.transcode_cache`)**:
+  * Each directory maintains a `.transcode_cache` file listing completed media filenames.
+  * State is completely portable and lives with the files. Even if SQLite is reset or media is moved to a new drive, files are never re-encoded.
+  * The scanner checks `.transcode_cache` first and skips cached files in $O(1)$ time.
 
 ---
 

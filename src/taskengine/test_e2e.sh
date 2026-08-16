@@ -83,13 +83,20 @@ if [ "$TASK1_STATUS" != "COMPLETED" ] || [ "$TASK2_STATUS" != "COMPLETED" ]; the
     exit 1
 fi
 
-# Verify transcoded output file exists
-EXPECTED_OUTPUT="$TEST_MEDIA_DIR/input_video.transcoded.mp4"
+# Verify transcoded clean output file exists
+EXPECTED_OUTPUT="$TEST_MEDIA_DIR/input_video.mp4"
 if [ ! -f "$EXPECTED_OUTPUT" ]; then
-    echo "ERROR: Transcoded output file $EXPECTED_OUTPUT not found!"
+    echo "ERROR: Transcoded clean output file $EXPECTED_OUTPUT not found!"
     exit 1
 fi
-echo "Verified transcoded media file: $EXPECTED_OUTPUT ($(wc -c < "$EXPECTED_OUTPUT") bytes)"
+echo "Verified clean transcoded media file: $EXPECTED_OUTPUT ($(wc -c < "$EXPECTED_OUTPUT") bytes)"
+
+EXPECTED_CACHE="$TEST_MEDIA_DIR/.transcode_cache"
+if [ ! -f "$EXPECTED_CACHE" ]; then
+    echo "ERROR: .transcode_cache not found in $TEST_MEDIA_DIR!"
+    exit 1
+fi
+echo "Verified local folder cache: $EXPECTED_CACHE ($(cat "$EXPECTED_CACHE"))"
 
 # 7. Enqueue Task with Prerequisites & Synced Assets
 echo "[7/8] Enqueueing Task with Prerequisites & Synced Python Assets..."

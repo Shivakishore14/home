@@ -1,0 +1,7 @@
+worker_id: "macbook-air"
+max_concurrent_tasks: 1
+enabled_plugins:
+  - "video-transcoder"
+scratch_dir: "~/.taskengine/scratch"
+path_mappings:
+  "/Volumes/drive001/media": "~/Desktop/macmini_media"

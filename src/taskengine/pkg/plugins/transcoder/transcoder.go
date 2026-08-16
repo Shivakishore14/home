@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,14 +17,93 @@ import (
 	"taskengine/pkg/plugin"
 )
 
+const TranscodeCacheFileName = ".transcode_cache"
+
 func init() {
 	plugin.RegisterServer(&VideoTranscoderServerPlugin{})
 	plugin.RegisterWorker(&VideoTranscoderWorkerPlugin{})
 }
 
+// readTranscodeCache reads the .transcode_cache in a directory into a lookup set.
+func readTranscodeCache(dir string) map[string]bool {
+	cachePath := filepath.Join(dir, TranscodeCacheFileName)
+	entries := make(map[string]bool)
+	f, err := os.Open(cachePath)
+	if err != nil {
+		return entries
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !strings.HasPrefix(line, "#") {
+			entries[line] = true
+		}
+	}
+	return entries
+}
+
+// appendTranscodeCache adds a completed filename to .transcode_cache in the directory.
+func appendTranscodeCache(dir, filename string) error {
+	existing := readTranscodeCache(dir)
+	if existing[filename] {
+		return nil
+	}
+
+	cachePath := filepath.Join(dir, TranscodeCacheFileName)
+	f, err := os.OpenFile(cachePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = f.WriteString(filename + "\n")
+	return err
+}
+
+// copyFile copies a file from src to dst sequentially in 2MB chunks.
+func copyFile(ctx context.Context, src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open source file %s: %w", src, err)
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to create destination file %s: %w", dst, err)
+	}
+	defer out.Close()
+
+	buf := make([]byte, 2*1024*1024) // 2MB buffer
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		n, rErr := in.Read(buf)
+		if n > 0 {
+			if _, wErr := out.Write(buf[:n]); wErr != nil {
+				return fmt.Errorf("write error: %w", wErr)
+			}
+		}
+		if rErr != nil {
+			if rErr == io.EOF {
+				break
+			}
+			return fmt.Errorf("read error: %w", rErr)
+		}
+	}
+
+	return out.Sync()
+}
+
 // VideoTranscoderServerPlugin scans directories and enqueues transcoding tasks.
 type VideoTranscoderServerPlugin struct {
 	Directory        string   `json:"directory"`
+	Directories      []string `json:"directories"`
 	TargetExtensions []string `json:"target_extensions"`
 	ExcludePatterns  []string `json:"exclude_patterns"`
 	TargetCodec      string   `json:"target_codec"`
@@ -31,7 +112,6 @@ type VideoTranscoderServerPlugin struct {
 	Preset           string   `json:"preset"`
 	AudioBitrate     string   `json:"audio_bitrate"`
 	Container        string   `json:"container"`
-	ReplaceOriginal  bool     `json:"replace_original"`
 }
 
 func (s *VideoTranscoderServerPlugin) Name() string {
@@ -43,7 +123,7 @@ func (s *VideoTranscoderServerPlugin) Init(ctx context.Context, config json.RawM
 		_ = json.Unmarshal(config, s)
 	}
 	if len(s.TargetExtensions) == 0 {
-		s.TargetExtensions = []string{".mkv", ".mp4", ".mov", ".avi", ".ts", ".m2ts"}
+		s.TargetExtensions = []string{".mkv", ".mp4", ".mov", ".avi", ".ts", ".m2ts", ".wmv", ".flv"}
 	}
 	if s.TargetCodec == "" {
 		s.TargetCodec = "libx264"
@@ -67,78 +147,107 @@ func (s *VideoTranscoderServerPlugin) Init(ctx context.Context, config json.RawM
 }
 
 func (s *VideoTranscoderServerPlugin) GenerateTasks(ctx context.Context) ([]plugin.TaskPayload, error) {
-	if s.Directory == "" {
+	var targetDirs []string
+	if len(s.Directories) > 0 {
+		targetDirs = append(targetDirs, s.Directories...)
+	} else if s.Directory != "" {
+		targetDirs = append(targetDirs, s.Directory)
+	}
+
+	if len(targetDirs) == 0 {
 		return nil, nil
 	}
 
 	var payloads []plugin.TaskPayload
+	dirCacheMap := make(map[string]map[string]bool)
 
-	err := filepath.Walk(s.Directory, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
+	for _, rootDir := range targetDirs {
+		if _, err := os.Stat(rootDir); os.IsNotExist(err) {
+			continue
 		}
 
-		ext := strings.ToLower(filepath.Ext(path))
-		matchedExt := false
-		for _, targetExt := range s.TargetExtensions {
-			if ext == strings.ToLower(targetExt) {
-				matchedExt = true
-				break
+		err := filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
 			}
-		}
-		if !matchedExt {
+
+			filename := d.Name()
+			// Ignore hidden files and temporary encodings
+			if strings.HasPrefix(filename, ".") ||
+				strings.HasSuffix(filename, ".temp.mp4") ||
+				strings.HasSuffix(filename, ".transcoded.mp4") ||
+				strings.HasSuffix(filename, ".part") {
+				return nil
+			}
+
+			ext := strings.ToLower(filepath.Ext(filename))
+			matchedExt := false
+			for _, targetExt := range s.TargetExtensions {
+				if ext == strings.ToLower(targetExt) {
+					matchedExt = true
+					break
+				}
+			}
+			if !matchedExt {
+				return nil
+			}
+
+			dir := filepath.Dir(path)
+			cache, ok := dirCacheMap[dir]
+			if !ok {
+				cache = readTranscodeCache(dir)
+				dirCacheMap[dir] = cache
+			}
+
+			// Check if file itself or clean target .mp4 is in .transcode_cache
+			baseName := strings.TrimSuffix(filename, ext)
+			cleanMP4 := fmt.Sprintf("%s.mp4", baseName)
+
+			if cache[filename] || cache[cleanMP4] {
+				return nil // Already transcoded and cached locally
+			}
+
+			params := map[string]interface{}{
+				"target_codec":  s.TargetCodec,
+				"target_height": s.TargetHeight,
+				"crf":           s.CRF,
+				"preset":        s.Preset,
+				"audio_bitrate": s.AudioBitrate,
+				"container":     s.Container,
+			}
+			paramsJSON, _ := json.Marshal(params)
+
+			payloads = append(payloads, plugin.TaskPayload{
+				PluginName: s.Name(),
+				TargetFile: path,
+				Params:     paramsJSON,
+			})
+
 			return nil
-		}
-
-		// Skip if filename contains .transcoded.
-		if strings.Contains(filepath.Base(path), ".transcoded.") {
-			return nil
-		}
-
-		// Check if transcoded sibling already exists
-		baseName := strings.TrimSuffix(filepath.Base(path), ext)
-		transcodedSibling := filepath.Join(filepath.Dir(path), fmt.Sprintf("%s.transcoded.%s", baseName, s.Container))
-		if _, err := os.Stat(transcodedSibling); err == nil {
-			return nil // Already transcoded
-		}
-
-		params := map[string]interface{}{
-			"target_codec":     s.TargetCodec,
-			"target_height":    s.TargetHeight,
-			"crf":              s.CRF,
-			"preset":           s.Preset,
-			"audio_bitrate":    s.AudioBitrate,
-			"container":        s.Container,
-			"replace_original": s.ReplaceOriginal,
-		}
-		paramsJSON, _ := json.Marshal(params)
-
-		payloads = append(payloads, plugin.TaskPayload{
-			PluginName: s.Name(),
-			TargetFile: path,
-			Params:     paramsJSON,
 		})
 
-		return nil
-	})
+		if err != nil {
+			log.Printf("[Scanner Error %s] %v", rootDir, err)
+		}
+	}
 
-	return payloads, err
+	return payloads, nil
 }
 
 // TranscodeParams configures 1080p video encoding for universal Jellyfin Direct Play.
 type TranscodeParams struct {
-	TargetCodec     string `json:"target_codec"`
-	TargetHeight    int    `json:"target_height"`
-	CRF             int    `json:"crf"`
-	Preset          string `json:"preset"`
-	AudioBitrate    string `json:"audio_bitrate"`
-	Container       string `json:"container"`
-	FFmpegBinary    string `json:"ffmpeg_binary"`
-	FFprobeBinary   string `json:"ffprobe_binary"`
-	ReplaceOriginal bool   `json:"replace_original"`
+	TargetCodec   string `json:"target_codec"`
+	TargetHeight  int    `json:"target_height"`
+	CRF           int    `json:"crf"`
+	Preset        string `json:"preset"`
+	AudioBitrate  string `json:"audio_bitrate"`
+	Container     string `json:"container"`
+	ScratchDir    string `json:"scratch_dir"`
+	FFmpegBinary  string `json:"ffmpeg_binary"`
+	FFprobeBinary string `json:"ffprobe_binary"`
 }
 
-// VideoTranscoderWorkerPlugin executes video transcoding jobs.
+// VideoTranscoderWorkerPlugin executes video transcoding jobs with optional local SSD scratch buffering.
 type VideoTranscoderWorkerPlugin struct {
 	defaultFFmpeg  string
 	defaultFFprobe string
@@ -171,6 +280,20 @@ func (w *VideoTranscoderWorkerPlugin) Init(ctx context.Context, config json.RawM
 	return nil
 }
 
+func resolveHomePath(p string) string {
+	if p == "" {
+		return ""
+	}
+	if strings.HasPrefix(p, "~/") || p == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			trimmed := strings.TrimPrefix(p, "~")
+			trimmed = strings.TrimPrefix(trimmed, "/")
+			return filepath.Join(home, trimmed)
+		}
+	}
+	return p
+}
+
 func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugin.TaskPayload, reporter plugin.ProgressReporter) error {
 	var params TranscodeParams
 	if len(payload.Params) > 0 {
@@ -196,6 +319,11 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 		params.CRF = 21
 	}
 
+	scratchDir := params.ScratchDir
+	if scratchDir == "" {
+		scratchDir = os.Getenv("SCRATCH_DIR")
+	}
+
 	ffmpegBin := params.FFmpegBinary
 	if ffmpegBin == "" {
 		ffmpegBin = w.defaultFFmpeg
@@ -205,28 +333,58 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 		ffprobeBin = w.defaultFFprobe
 	}
 
-	inputFile := payload.TargetFile
-	if inputFile == "" {
+	remoteInputFile := resolveHomePath(payload.TargetFile)
+	if remoteInputFile == "" {
 		return fmt.Errorf("target file is empty")
 	}
 
-	if _, err := os.Stat(inputFile); err != nil {
-		return fmt.Errorf("input video file not found: %s: %w", inputFile, err)
+	if _, err := os.Stat(remoteInputFile); err != nil {
+		return fmt.Errorf("input video file not found: %s: %w", remoteInputFile, err)
 	}
 
-	// 1. Probe input duration
-	durationSec := getDuration(ctx, ffprobeBin, inputFile)
+	dir := filepath.Dir(remoteInputFile)
+	base := strings.TrimSuffix(filepath.Base(remoteInputFile), filepath.Ext(remoteInputFile))
+	finalCleanRemoteFile := filepath.Join(dir, fmt.Sprintf("%s.mp4", base))
 
-	// 2. Determine output path
-	dir := filepath.Dir(inputFile)
-	base := strings.TrimSuffix(filepath.Base(inputFile), filepath.Ext(inputFile))
-	outputFile := filepath.Join(dir, fmt.Sprintf("%s.transcoded.%s", base, params.Container))
+	var encodeInputPath string
+	var encodeOutputPath string
+	var localFinalOutput string
+	var taskScratchDir string
+
+	if scratchDir != "" {
+		resolvedScratch := resolveHomePath(scratchDir)
+		taskScratchDir = filepath.Join(resolvedScratch, payload.ID)
+		_ = os.MkdirAll(taskScratchDir, 0755)
+		defer os.RemoveAll(taskScratchDir)
+
+		encodeInputPath = filepath.Join(taskScratchDir, filepath.Base(remoteInputFile))
+		encodeOutputPath = filepath.Join(taskScratchDir, fmt.Sprintf(".temp.%s.mp4", base))
+		localFinalOutput = filepath.Join(taskScratchDir, fmt.Sprintf("%s.mp4", base))
+
+		// 1. Buffer source to local scratch SSD
+		_ = reporter.Report(ctx, plugin.ProgressReport{
+			Progress: 0.5,
+			Message:  fmt.Sprintf("Copying %s to local SSD scratch...", filepath.Base(remoteInputFile)),
+			LogChunk: fmt.Sprintf("[Scratch Buffer] Pulling %s to local SSD (%s)\n", remoteInputFile, encodeInputPath),
+		})
+
+		if err := copyFile(ctx, remoteInputFile, encodeInputPath); err != nil {
+			return fmt.Errorf("failed to copy source to scratch: %w", err)
+		}
+	} else {
+		// Direct in-place encoding
+		encodeInputPath = remoteInputFile
+		encodeOutputPath = filepath.Join(dir, fmt.Sprintf(".temp.%s.mp4", base))
+	}
+
+	// 2. Probe input duration
+	durationSec := getDuration(ctx, ffprobeBin, encodeInputPath)
 
 	// 3. Build FFmpeg command for 1080p Universal Direct Play
 	args := []string{
 		"-nostdin",
 		"-y",
-		"-i", inputFile,
+		"-i", encodeInputPath,
 	}
 
 	// 1080p Downscale filter (max width 1920, preserve aspect ratio, even height)
@@ -252,11 +410,9 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 	args = append(args, "-c:a", "aac", "-b:a", params.AudioBitrate, "-ac", "2")
 
 	// MP4 faststart for instant streaming
-	if params.Container == "mp4" {
-		args = append(args, "-movflags", "+faststart")
-	}
+	args = append(args, "-movflags", "+faststart")
 
-	args = append(args, "-progress", "pipe:1", outputFile)
+	args = append(args, "-progress", "pipe:1", encodeOutputPath)
 
 	cmd := exec.CommandContext(ctx, ffmpegBin, args...)
 
@@ -308,9 +464,9 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 				us, err := strconv.ParseInt(val, 10, 64)
 				if err == nil && durationSec > 0 {
 					currentSec := float64(us) / 1000000.0
-					pct := (currentSec / durationSec) * 100.0
-					if pct > 100.0 {
-						pct = 100.0
+					pct := (currentSec / durationSec) * 98.0
+					if pct > 98.0 {
+						pct = 98.0
 					}
 					_ = reporter.Report(ctx, plugin.ProgressReport{
 						Progress: pct,
@@ -321,9 +477,9 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 			case "progress":
 				if val == "end" {
 					_ = reporter.Report(ctx, plugin.ProgressReport{
-						Progress: 100.0,
+						Progress: 98.0,
 						Speed:    currentSpeed,
-						Message:  "Transcoding completed",
+						Message:  "Transcoding completed on local SSD",
 					})
 				}
 			}
@@ -334,15 +490,59 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 	wg.Wait()
 
 	if err != nil {
+		_ = os.Remove(encodeOutputPath) // Clean up temp file on failure
 		return fmt.Errorf("ffmpeg execution failed: %w", err)
 	}
 
-	// If replace_original is true, atomically replace
-	if params.ReplaceOriginal {
-		if err := os.Rename(outputFile, inputFile); err != nil {
-			return fmt.Errorf("failed to replace original video file: %w", err)
+	// Verify temp output file exists and is non-empty
+	fi, err := os.Stat(encodeOutputPath)
+	if err != nil || fi.Size() == 0 {
+		_ = os.Remove(encodeOutputPath)
+		return fmt.Errorf("ffmpeg produced empty or missing output file: %w", err)
+	}
+
+	// Finalization Phase
+	if scratchDir != "" {
+		// Rename temp output to local clean file
+		if err := os.Rename(encodeOutputPath, localFinalOutput); err != nil {
+			return fmt.Errorf("failed to finalize scratch file: %w", err)
+		}
+
+		// Upload back to remote storage (SMB/HDD)
+		_ = reporter.Report(ctx, plugin.ProgressReport{
+			Progress: 99.0,
+			Message:  "Uploading transcoded MP4 to storage...",
+			LogChunk: fmt.Sprintf("[Scratch Finalize] Uploading %s to %s\n", localFinalOutput, finalCleanRemoteFile),
+		})
+
+		if err := copyFile(ctx, localFinalOutput, finalCleanRemoteFile); err != nil {
+			return fmt.Errorf("failed to upload transcoded file to storage: %w", err)
+		}
+	} else {
+		// Atomically rename local temp file to clean final .mp4
+		if err := os.Rename(encodeOutputPath, finalCleanRemoteFile); err != nil {
+			return fmt.Errorf("failed to finalize transcoded file: %w", err)
 		}
 	}
+
+	// Clean replacement: remove original input file if extension differed
+	if remoteInputFile != finalCleanRemoteFile {
+		_ = os.Remove(remoteInputFile)
+	}
+
+	// Append to directory's local .transcode_cache
+	finalFileName := filepath.Base(finalCleanRemoteFile)
+	if err := appendTranscodeCache(dir, finalFileName); err != nil {
+		_ = reporter.Report(ctx, plugin.ProgressReport{
+			LogChunk: fmt.Sprintf("[Warning] Failed to write .transcode_cache: %v\n", err),
+		})
+	}
+
+	_ = reporter.Report(ctx, plugin.ProgressReport{
+		Progress: 100.0,
+		Message:  "Transcode completed successfully",
+		LogChunk: fmt.Sprintf("[Complete] File %s is ready for Jellyfin Direct Play\n", finalFileName),
+	})
 
 	return nil
 }
