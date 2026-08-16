@@ -1,0 +1,21 @@
+server:
+  port: 8080
+  db_path: "data/taskengine.db"
+  heartbeat_timeout_seconds: 30
+  stale_task_check_interval_seconds: 10
+
+defaults:
+  max_concurrent_tasks: 2
+  path_mappings:
+    "/Volumes/drive001/media": "/Volumes/drive001/media"
+  plugin_configs:
+    command-runner:
+      shell: "/bin/zsh"
+    video-transcoder:
+      target_codec: "libx264"
+      target_height: 1080
+      crf: 21
+      preset: "medium"
+      audio_bitrate: "192k"
+      ffmpeg_binary: "ffmpeg"
+      ffprobe_binary: "ffprobe"

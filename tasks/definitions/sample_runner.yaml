@@ -1,0 +1,7 @@
+name: "sample-system-info"
+plugin_name: "command-runner"
+schedule: "*/15 * * * *"
+enabled: false
+priority: 5
+params:
+  command: "echo 'Worker System Check: $(uname -a)'; echo 'Task complete!'"

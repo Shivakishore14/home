@@ -1,0 +1,10 @@
+worker_id: "laptop1"
+max_concurrent_tasks: 2
+path_mappings:
+  "/Volumes/drive001/media": "/Users/air/Desktop/macmini_media"
+plugin_configs:
+  video-transcoder:
+    target_codec: "hevc_videotoolbox"
+    ffmpeg_binary: "/opt/homebrew/bin/ffmpeg"
+  command-runner:
+    shell: "/bin/zsh"

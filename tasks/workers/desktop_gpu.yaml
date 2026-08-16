@@ -1,0 +1,11 @@
+worker_id: "desktop_gpu"
+max_concurrent_tasks: 4
+path_mappings:
+  "/Volumes/drive001/media": "D:\\ServerMedia"
+plugin_configs:
+  video-transcoder:
+    target_codec: "hevc_nvenc"
+    preset: "p5"
+    ffmpeg_binary: "C:\\ffmpeg\\bin\\ffmpeg.exe"
+  command-runner:
+    shell: "powershell.exe"

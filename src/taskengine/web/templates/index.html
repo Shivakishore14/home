@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaskEngine Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="navbar">
+    <div class="brand">
+      <span class="brand-icon">⚡</span>
+      <span class="brand-title">TaskEngine</span>
+      <span class="brand-subtitle">Distributed Orchestration</span>
+    </div>
+    <div class="nav-actions">
+      <div class="live-indicator">
+        <span class="dot" id="sse-dot"></span>
+        <span id="sse-label">Connecting...</span>
+      </div>
+      <button class="btn" onclick="reloadConfig()" title="Reload YAML configs from tasks/">
+        🔄 Reload Config
+      </button>
+      <button class="btn btn-primary" onclick="openCreateTaskModal()">
+        + New Task
+      </button>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Top Stats Row -->
+    <section class="stats-grid">
+      <div class="stat-card active-workers">
+        <span class="stat-label">Active Workers</span>
+        <span class="stat-value" id="stat-workers">0</span>
+      </div>
+      <div class="stat-card running-tasks">
+        <span class="stat-label">Running Tasks</span>
+        <span class="stat-value" id="stat-running">0</span>
+      </div>
+      <div class="stat-card pending-tasks">
+        <span class="stat-label">Pending Queue</span>
+        <span class="stat-value" id="stat-pending">0</span>
+      </div>
+      <div class="stat-card completed-tasks">
+        <span class="stat-label">Completed</span>
+        <span class="stat-value" id="stat-completed">0</span>
+      </div>
+      <div class="stat-card failed-tasks">
+        <span class="stat-label">Failed</span>
+        <span class="stat-value" id="stat-failed">0</span>
+      </div>
+    </section>
+
+    <!-- Main Grid: Workers + Task Queue -->
+    <section class="main-grid">
+      <!-- Active Workers Panel -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Registered Workers</span>
+          <button class="btn btn-sm" onclick="refreshWorkers()">Refresh</button>
+        </div>
+        <div class="card-body">
+          <div class="worker-list" id="workers-list">
+            <div style="color: var(--text-muted); font-size: 0.8rem;">Loading workers...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Task Queue Panel -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Task Execution Queue</span>
+          <div class="tabs">
+            <button class="tab-btn active" data-filter="">All</button>
+            <button class="tab-btn" data-filter="RUNNING">Running</button>
+            <button class="tab-btn" data-filter="PENDING">Pending</button>
+            <button class="tab-btn" data-filter="COMPLETED">Completed</button>
+            <button class="tab-btn" data-filter="FAILED">Failed</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Plugin</th>
+                <th>Target File / Spec</th>
+                <th>Worker</th>
+                <th>Status</th>
+                <th>Progress</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tasks-tbody">
+              <tr>
+                <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading tasks...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Create Task Modal -->
+  <div class="modal-backdrop" id="modal-create-task">
+    <div class="modal-window">
+      <div class="modal-header">
+        <h3>Enqueue New Task</h3>
+        <button class="btn btn-sm" onclick="closeCreateTaskModal()">✕</button>
+      </div>
+      <form id="form-create-task" onsubmit="submitCreateTask(event)">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Plugin Name</label>
+            <select class="form-control" id="task-plugin" required>
+              <option value="command-runner">command-runner (Generic Script / Command)</option>
+              <option value="video-transcoder">video-transcoder (FFmpeg Video Processing)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Target File (Optional, Server Path)</label>
+            <input type="text" class="form-control" id="task-target" placeholder="/Volumes/drive001/media/incoming/clip.mkv">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Priority (0 = Normal, 10 = High)</label>
+            <input type="number" class="form-control" id="task-priority" value="0" min="0" max="100">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Parameters (JSON)</label>
+            <textarea class="form-control" id="task-params" rows="5" placeholder='{"command": "echo Hello; echo PROGRESS: 100%"}'></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" onclick="closeCreateTaskModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Task</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Live Logs Modal -->
+  <div class="modal-backdrop" id="modal-logs">
+    <div class="modal-window">
+      <div class="modal-header">
+        <h3 id="modal-logs-title">Task Logs</h3>
+        <button class="btn btn-sm" onclick="closeLogsModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="terminal-window" id="terminal-logs">Loading logs...</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeLogsModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

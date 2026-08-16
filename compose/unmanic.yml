@@ -1,0 +1,25 @@
+# ==============================================================================
+# Unmanic Transcoding Automation Service Definition
+# ==============================================================================
+
+services:
+  unmanic:
+    image: josh5/unmanic:latest
+    container_name: unmanic
+    user: "${PUID}:${PGID}"
+    restart: unless-stopped
+    ports:
+      - "${UNMANIC_PORT:-8888}:8888"
+    volumes:
+      # Persistent configuration data
+      - "${DOCKER_DIR}/unmanic/config:/config"
+      # Media library to watch and transcode (reads/writes)
+      - "${MEDIA_DIR}:/library"
+      # Cache directory for transcoding temp files
+      - "${DOCKER_DIR}/unmanic/cache:/tmp/unmanic"
+    networks:
+      - home-network
+    environment:
+      - TZ=${TZ:-UTC}
+      - PUID=${PUID}
+      - PGID=${PGID}

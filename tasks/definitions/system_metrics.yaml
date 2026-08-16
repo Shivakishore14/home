@@ -1,0 +1,15 @@
+name: "system-metrics-reporter"
+plugin_name: "command-runner"
+schedule: "*/10 * * * *"
+enabled: true
+priority: 5
+
+prerequisites:
+  check_command: "which python3 || (echo 'python3 is required' && exit 1)"
+
+assets:
+  files:
+    - "tasks/assets/system-metrics/gather_metrics.py"
+
+params:
+  command: "python3 $TASK_ASSETS_DIR/gather_metrics.py"

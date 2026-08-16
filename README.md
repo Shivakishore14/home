@@ -46,6 +46,15 @@ home/
 │   ├── jellyfin.yml         # Jellyfin media player definition
 │   └── homeassistant.yml    # Home Assistant smart-home definition
 │
+├── tasks/                   # TaskEngine git-tracked configs & schedules
+│   ├── config.yaml          # Server runtime settings & defaults
+│   ├── workers/             # Per-worker override definitions
+│   ├── definitions/         # Periodic task schedules & definitions
+│   └── assets/              # Task scripts synced dynamically to workers
+│
+├── src/
+│   └── taskengine/          # TaskEngine distributed Go orchestrator
+│
 ├── configs/                 # Config template/schema tracking
 │   └── README.md
 │
@@ -58,6 +67,7 @@ home/
 │
 ├── docs/                    # Deep-dive documentation
 │   ├── architecture.md      # Scaling and design docs
+│   ├── taskengine.md        # TaskEngine operator and developer manual
 │   ├── macos.md             # macOS/Apple Silicon specific settings
 │   └── restore.md           # Backup & Recovery documentation
 │
@@ -119,10 +129,25 @@ The [Makefile](file:///Users/server/github/home/Makefile) acts as the CLI wrappe
 | `make restore` | Launches the recovery process to restore configurations from a backup file. |
 | `make config-check` | Validates YAML syntax and verifies environment file merges. |
 | `make clean` | Prunes stopped containers, unused networks, and dangling docker objects. |
+| `make taskengine-build` | Compiles the distributed TaskEngine binary (`bin/taskengine`). |
+| `make taskengine-server` | Starts TaskEngine in server mode on `PORT=8080`. |
+| `make taskengine-worker` | Starts TaskEngine in worker mode (`SERVER_URL=... WORKER_ID=...`). |
+| `make taskengine-reload` | Triggers hot configuration reload from the `tasks/` directory. |
+| `make taskengine-status` | Displays server status, task counts, and registered workers. |
+| `make taskengine-test` | Runs the full Go unit and integration test suite. |
+| `make taskengine-e2e` | Executes end-to-end integration test with real task execution. |
+| `make taskengine-release` | Cross-compiles binaries for macOS & Linux (ARM64/AMD64). |
 
 ---
 
 ## 🐋 Service Documentation
+
+### TaskEngine Distributed Orchestrator
+- **Source Path**: [src/taskengine/](file:///Users/server/github/home/src/taskengine/)
+- **Configuration Directory**: [tasks/](file:///Users/server/github/home/tasks/)
+- **Documentation**: [docs/taskengine.md](file:///Users/server/github/home/docs/taskengine.md)
+- **Host Port**: `8080` (Web UI & REST API)
+- **Features**: Dual-mode binary (`server`/`worker`), generic multi-language `command-runner`, 1080p Jellyfin Direct Play video transcoder, task-level prerequisites & git-synced assets, per-worker path translation, reactive HTMX + SSE dashboard.
 
 ### Jellyfin Media Server
 - **Compose Path**: [compose/jellyfin.yml](file:///Users/server/github/home/compose/jellyfin.yml)
@@ -138,7 +163,7 @@ The [Makefile](file:///Users/server/github/home/Makefile) acts as the CLI wrappe
   ├── Music/
   └── Photos/
   ```
-- **Apple Silicon Hardware Acceleration**: Transcoding is handled on the CPU inside Docker because macOS does not support GPU pass-through to Docker Linux VMs. If you require hardware-accelerated transcoding (Apple VideoToolbox), run Jellyfin natively on macOS. See [docs/macos.md](file:///Users/server/github/home/docs/macos.md) for details.
+- **Pre-Transcoding**: Use TaskEngine's `video-transcoder` to pre-transcode media to 1080p H.264 + AAC Stereo with `+faststart` MP4 containers. This guarantees **100% Direct Play** on all clients with 0% CPU transcoding on the server.
 
 ### Home Assistant Core
 - **Compose Path**: [compose/homeassistant.yml](file:///Users/server/github/home/compose/homeassistant.yml)

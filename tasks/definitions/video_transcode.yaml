@@ -1,0 +1,16 @@
+name: "video-transcode-incoming"
+plugin_name: "video-transcoder"
+schedule: "*/30 * * * *"
+enabled: false
+priority: 10
+scanner:
+  directory: "/Volumes/drive001/media/incoming"
+  target_extensions: [".mkv", ".mp4", ".mov", ".avi", ".ts", ".m2ts"]
+  exclude_patterns: ["*.transcoded.*", "*.temp.*"]
+params:
+  target_codec: "libx264"
+  target_height: 1080
+  crf: 21
+  preset: "medium"
+  audio_bitrate: "192k"
+  container: "mp4"

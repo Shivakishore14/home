@@ -23,3 +23,10 @@ backups/
 
 # Logs
 *.log
+
+# TaskEngine artifacts & local databases
+src/taskengine/bin/
+*.db
+*.db-wal
+*.db-shm
+data/

@@ -94,4 +94,55 @@ help:
 	@echo "   make restore       - Restore application configuration data from backup"
 	@echo "   make config-check  - Validate docker-compose syntax"
 	@echo "   make clean         - Prune unused docker resources"
+	@echo "   make taskengine-build   - Build the TaskEngine distributed binary"
+	@echo "   make taskengine-test    - Run all TaskEngine unit & integration tests"
+	@echo "   make taskengine-server  - Run TaskEngine in server mode (PORT=8080)"
+	@echo "   make taskengine-worker  - Run TaskEngine in worker mode (SERVER_URL=... WORKER_ID=...)"
+	@echo "   make taskengine-reload  - Trigger hot configuration reload from tasks/"
+	@echo "   make taskengine-status  - View TaskEngine stats and active workers"
+	@echo "   make taskengine-e2e     - Run automated end-to-end integration test"
+	@echo "   make taskengine-release - Cross-compile binaries for Linux & macOS (ARM64/AMD64)"
 	@echo "======================================================================"
+
+SERVER_URL ?= http://localhost:8080
+WORKER_ID ?=
+CONCURRENCY ?= 0
+PORT ?= 8080
+
+.PHONY: taskengine-build
+taskengine-build:
+	@echo "==> Building TaskEngine..."
+	@$(MAKE) -C src/taskengine build
+
+.PHONY: taskengine-test
+taskengine-test:
+	@echo "==> Running TaskEngine test suite..."
+	@$(MAKE) -C src/taskengine test
+
+.PHONY: taskengine-server
+taskengine-server: taskengine-build
+	@./src/taskengine/bin/taskengine server --port $(PORT) --tasks-dir tasks
+
+.PHONY: taskengine-worker
+taskengine-worker: taskengine-build
+	@ARGS="--server-url $(SERVER_URL)"; \
+	if [ -n "$(WORKER_ID)" ]; then ARGS="$$ARGS --worker-id $(WORKER_ID)"; fi; \
+	if [ "$(CONCURRENCY)" -gt 0 ]; then ARGS="$$ARGS --concurrency $(CONCURRENCY)"; fi; \
+	./src/taskengine/bin/taskengine worker $$ARGS
+
+.PHONY: taskengine-reload
+taskengine-reload: taskengine-build
+	@./src/taskengine/bin/taskengine reload --server-url $(SERVER_URL)
+
+.PHONY: taskengine-status
+taskengine-status: taskengine-build
+	@./src/taskengine/bin/taskengine status --server-url $(SERVER_URL)
+
+.PHONY: taskengine-e2e
+taskengine-e2e: taskengine-build
+	@$(MAKE) -C src/taskengine e2e
+
+.PHONY: taskengine-release
+taskengine-release:
+	@$(MAKE) -C src/taskengine cross-compile
+
