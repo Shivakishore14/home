@@ -212,6 +212,14 @@ Path translation uses longest-prefix matching before invoking worker plugins.
 
 All commands are managed through the root [Makefile](file:///Users/server/github/home/Makefile):
 
+### Primary Machine Entrypoints
+| Entrypoint | Command | Description |
+| :--- | :--- | :--- |
+| **Mac mini (Server Node)** | `make macmini` | Starts Docker Compose stack in background + launches TaskEngine server |
+| **MacBook Air (Worker Node)** | `make macbookair` | Starts TaskEngine worker (`WORKER_ID=macbook-air`) connecting to `SERVER_URL` |
+| **MacBook Air (Remote Server)** | `make macbookair SERVER_URL=http://<macmini-ip>:8080` | MacBook Air worker connecting over LAN / Tailscale |
+
+### TaskEngine CLI Commands
 | Task | Command | Description |
 | :--- | :--- | :--- |
 | **Build Binary** | `make taskengine-build` | Compiles `src/taskengine/bin/taskengine` |
@@ -223,6 +231,7 @@ All commands are managed through the root [Makefile](file:///Users/server/github
 | **Run Unit Tests**| `make taskengine-test` | Runs full Go test suite across all packages |
 | **Run E2E Tests** | `make taskengine-e2e` | Runs automated end-to-end integration test |
 | **Cross-Compile** | `make taskengine-release` | Builds Linux & macOS binaries (ARM64 & AMD64) |
+
 
 ---
 

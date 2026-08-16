@@ -94,28 +94,37 @@ To ensure the internal SSD is protected from read/write wear and has sufficient 
 
 ## 🚀 Quick Start (Installation)
 
-To get the infrastructure running on a fresh Mac:
+To get the infrastructure running on each machine:
 
+### 1. Mac mini (Home Server & Orchestrator Node)
 ```bash
-# 1. Clone the repository
+# Clone the repository
 git clone <your-repository-url>
 cd home
 
-# 2. Start the stack (this automatically copies .env.example, initializes directories on drive001, and starts containers)
-make up
+# Start the full Mac mini stack (initializes .env/storage, starts Docker Compose, and launches TaskEngine server)
+make macmini
 ```
 
-Wait for Docker to fetch the container images and run healthchecks. You can check the health status of the services by running:
+### 2. MacBook Air (Distributed Worker Node)
 ```bash
-make status
+# Start the TaskEngine worker on MacBook Air (connecting to Mac mini server URL)
+make macbookair SERVER_URL=http://<macmini-ip>:8080
 ```
 
 ---
 
 ## 🛠️ Operational Commands Reference
 
-The [Makefile](file:///Users/server/github/home/Makefile) acts as the CLI wrapper for the server.
+The [Makefile](file:///Users/server/github/home/Makefile) acts as the unified CLI for the infrastructure.
 
+### Machine Entrypoints
+| Command | Action |
+|:---|:---|
+| `make macmini` | **Mac mini Entrypoint**: Runs Docker Compose services in the background and starts TaskEngine server. |
+| `make macbookair` | **MacBook Air Entrypoint**: Runs TaskEngine worker with `WORKER_ID=macbook-air` (accepts `SERVER_URL=...`). |
+
+### Docker & Infrastructure Commands
 | Command | Action |
 |:---|:---|
 | `make init` | Copies `.env.example` to `.env` and initializes storage directories on `/Volumes/drive001`. |
@@ -129,6 +138,10 @@ The [Makefile](file:///Users/server/github/home/Makefile) acts as the CLI wrappe
 | `make restore` | Launches the recovery process to restore configurations from a backup file. |
 | `make config-check` | Validates YAML syntax and verifies environment file merges. |
 | `make clean` | Prunes stopped containers, unused networks, and dangling docker objects. |
+
+### TaskEngine Orchestrator Commands
+| Command | Action |
+|:---|:---|
 | `make taskengine-build` | Compiles the distributed TaskEngine binary (`bin/taskengine`). |
 | `make taskengine-server` | Starts TaskEngine in server mode on `PORT=8080`. |
 | `make taskengine-worker` | Starts TaskEngine in worker mode (`SERVER_URL=... WORKER_ID=...`). |
@@ -137,6 +150,7 @@ The [Makefile](file:///Users/server/github/home/Makefile) acts as the CLI wrappe
 | `make taskengine-test` | Runs the full Go unit and integration test suite. |
 | `make taskengine-e2e` | Executes end-to-end integration test with real task execution. |
 | `make taskengine-release` | Cross-compiles binaries for macOS & Linux (ARM64/AMD64). |
+
 
 ---
 

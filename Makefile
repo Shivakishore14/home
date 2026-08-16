@@ -82,6 +82,10 @@ help:
 	@echo "======================================================================"
 	@echo " Home Server Infrastructure CLI"
 	@echo "======================================================================"
+	@echo " Machine Entrypoints:"
+	@echo "   make macmini       - Start Mac mini services (Docker Compose + TaskEngine server)"
+	@echo "   make macbookair    - Start MacBook Air TaskEngine worker"
+	@echo ""
 	@echo " Available commands:"
 	@echo "   make init          - Initialize host directories & .env file"
 	@echo "   make up            - Build and start services in the background"
@@ -111,6 +115,31 @@ PORT ?= 8080
 
 PLUGINS ?=
 
+# ==============================================================================
+# Machine Entrypoints
+# ==============================================================================
+
+.PHONY: macmini
+macmini: check-env taskengine-build
+	@echo "==> [Mac mini] Starting Docker Compose infrastructure..."
+	docker compose up -d
+	@echo "==> [Mac mini] Starting TaskEngine server on port $(PORT)..."
+	@./src/taskengine/bin/taskengine server --port $(PORT) --tasks-dir tasks
+
+.PHONY: macbookair macbook-air
+macbookair macbook-air: taskengine-build
+	@WORKER_ID_VAL="$(WORKER_ID)"; \
+	if [ -z "$$WORKER_ID_VAL" ]; then WORKER_ID_VAL="macbook-air"; fi; \
+	echo "==> [MacBook Air] Starting TaskEngine worker ($$WORKER_ID_VAL) connecting to $(SERVER_URL)..."; \
+	ARGS="--server-url $(SERVER_URL) --worker-id $$WORKER_ID_VAL"; \
+	if [ "$(CONCURRENCY)" -gt 0 ]; then ARGS="$$ARGS --concurrency $(CONCURRENCY)"; fi; \
+	if [ -n "$(PLUGINS)" ]; then ARGS="$$ARGS --plugins $(PLUGINS)"; fi; \
+	./src/taskengine/bin/taskengine worker $$ARGS
+
+# ==============================================================================
+# TaskEngine Targets
+# ==============================================================================
+
 .PHONY: taskengine-ensure-bin
 taskengine-ensure-bin:
 	@$(MAKE) -C src/taskengine ensure-bin SERVER_URL=$(SERVER_URL)
@@ -118,7 +147,7 @@ taskengine-ensure-bin:
 .PHONY: taskengine-build
 taskengine-build:
 	@echo "==> Building TaskEngine..."
-	@$(MAKE) -C src/taskengine build
+	@$(MAKE) -C src/taskengine build SERVER_URL=$(SERVER_URL)
 
 .PHONY: taskengine-test
 taskengine-test:
@@ -152,4 +181,5 @@ taskengine-e2e: taskengine-build
 .PHONY: taskengine-release
 taskengine-release:
 	@$(MAKE) -C src/taskengine cross-compile
+
 

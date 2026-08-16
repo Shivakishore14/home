@@ -1,4 +1,11 @@
-.PHONY: build test clean run-server run-worker reload status e2e cross-compile ensure-bin
+.PHONY: build test clean run-server run-worker reload status e2e cross-compile ensure-bin macmini macbookair macbook-air
+
+macmini: run-server
+
+macbookair macbook-air:
+	@WORKER_ID_VAL="$(WORKER_ID)"; \
+	if [ -z "$$WORKER_ID_VAL" ]; then WORKER_ID_VAL="macbook-air"; fi; \
+	$(MAKE) run-worker WORKER_ID=$$WORKER_ID_VAL SERVER_URL=$(SERVER_URL) CONCURRENCY=$(CONCURRENCY) PLUGINS=$(PLUGINS)
 
 BINARY_NAME=bin/taskengine
 SERVER_URL ?= http://localhost:8080
