@@ -25,15 +25,14 @@ endif
 
 ensure-bin:
 	@mkdir -p bin
-	@if [ -x $(BINARY_NAME) ]; then \
+	@if command -v go >/dev/null 2>&1; then \
+		go build -o $(BINARY_NAME) ./cmd/taskengine; \
+	elif [ -x "$(BINARY_NAME)" ]; then \
 		exit 0; \
 	elif [ -f "bin/taskengine_$(OS)_$(ARCH)" ]; then \
 		echo "==> Using pre-built binary for $(OS)/$(ARCH)..."; \
 		cp "bin/taskengine_$(OS)_$(ARCH)" $(BINARY_NAME); \
 		chmod +x $(BINARY_NAME); \
-	elif command -v go >/dev/null 2>&1; then \
-		echo "==> Building TaskEngine binary via Go..."; \
-		go build -o $(BINARY_NAME) ./cmd/taskengine; \
 	elif [ -n "$(SERVER_URL)" ] && curl -sSL -f "$(SERVER_URL)/api/v1/binaries/$(OS)_$(ARCH)" -o $(BINARY_NAME) 2>/dev/null; then \
 		echo "==> Downloaded TaskEngine binary for $(OS)/$(ARCH) from $(SERVER_URL)..."; \
 		chmod +x $(BINARY_NAME); \
@@ -61,20 +60,20 @@ test:
 clean:
 	rm -rf bin/ data/ *.db *.db-wal *.db-shm /tmp/taskengine_*
 
-run-server: ensure-bin
+run-server: build
 	./$(BINARY_NAME) server --port $(PORT) --tasks-dir ../../tasks
 
-run-worker: ensure-bin
+run-worker: build
 	@ARGS="--server-url $(SERVER_URL)"; \
 	if [ -n "$(WORKER_ID)" ]; then ARGS="$$ARGS --worker-id $(WORKER_ID)"; fi; \
 	if [ "$(CONCURRENCY)" -gt 0 ]; then ARGS="$$ARGS --concurrency $(CONCURRENCY)"; fi; \
 	if [ -n "$(PLUGINS)" ]; then ARGS="$$ARGS --plugins $(PLUGINS)"; fi; \
 	./$(BINARY_NAME) worker $$ARGS
 
-reload: ensure-bin
+reload: build
 	./$(BINARY_NAME) reload --server-url $(SERVER_URL)
 
-status: ensure-bin
+status: build
 	./$(BINARY_NAME) status --server-url $(SERVER_URL)
 
 e2e: build
@@ -90,5 +89,6 @@ cross-compile:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/taskengine_linux_amd64 ./cmd/taskengine
 	@echo "Building Linux ARM64 (aarch64)..."
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/taskengine_linux_arm64 ./cmd/taskengine
+	@cp -f "bin/taskengine_$(OS)_$(ARCH)" bin/taskengine
 	@echo "All cross-platform binaries successfully built in bin/:"
 	@ls -lh bin/

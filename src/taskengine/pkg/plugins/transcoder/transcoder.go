@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"taskengine/pkg/plugin"
 )
@@ -62,13 +63,19 @@ func appendTranscodeCache(dir, filename string) error {
 	return err
 }
 
-// copyFile copies a file from src to dst sequentially in 2MB chunks.
-func copyFile(ctx context.Context, src, dst string) error {
+// copyFileWithProgress copies a file from src to dst sequentially and emits progress reports.
+func copyFileWithProgress(ctx context.Context, src, dst, action string, reporter plugin.ProgressReporter) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("failed to open source file %s: %w", src, err)
 	}
 	defer in.Close()
+
+	fi, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	totalBytes := fi.Size()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
@@ -77,6 +84,10 @@ func copyFile(ctx context.Context, src, dst string) error {
 	defer out.Close()
 
 	buf := make([]byte, 2*1024*1024) // 2MB buffer
+	var copied int64
+	lastReport := time.Now()
+	startTime := time.Now()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -87,6 +98,25 @@ func copyFile(ctx context.Context, src, dst string) error {
 		if n > 0 {
 			if _, wErr := out.Write(buf[:n]); wErr != nil {
 				return fmt.Errorf("write error: %w", wErr)
+			}
+			copied += int64(n)
+
+			if (time.Since(lastReport) >= 1500*time.Millisecond || copied == totalBytes) && totalBytes > 0 {
+				lastReport = time.Now()
+				elapsed := time.Since(startTime).Seconds()
+				var speedMBps float64
+				if elapsed > 0 {
+					speedMBps = (float64(copied) / (1024 * 1024)) / elapsed
+				}
+				pct := float64(copied) / float64(totalBytes) * 100.0
+				copiedMB := float64(copied) / (1024 * 1024)
+				totalMB := float64(totalBytes) / (1024 * 1024)
+
+				_ = reporter.Report(ctx, plugin.ProgressReport{
+					Progress: 0.5,
+					Speed:    fmt.Sprintf("%.1f MB/s", speedMBps),
+					Message:  fmt.Sprintf("%s: %.1f%% (%.1f MB / %.1f MB) @ %.1f MB/s", action, pct, copiedMB, totalMB, speedMBps),
+				})
 			}
 		}
 		if rErr != nil {
@@ -362,13 +392,7 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 		localFinalOutput = filepath.Join(taskScratchDir, fmt.Sprintf("%s.mp4", base))
 
 		// 1. Buffer source to local scratch SSD
-		_ = reporter.Report(ctx, plugin.ProgressReport{
-			Progress: 0.5,
-			Message:  fmt.Sprintf("Copying %s to local SSD scratch...", filepath.Base(remoteInputFile)),
-			LogChunk: fmt.Sprintf("[Scratch Buffer] Pulling %s to local SSD (%s)\n", remoteInputFile, encodeInputPath),
-		})
-
-		if err := copyFile(ctx, remoteInputFile, encodeInputPath); err != nil {
+		if err := copyFileWithProgress(ctx, remoteInputFile, encodeInputPath, "Buffering source to local SSD", reporter); err != nil {
 			return fmt.Errorf("failed to copy source to scratch: %w", err)
 		}
 	} else {
@@ -509,13 +533,7 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 		}
 
 		// Upload back to remote storage (SMB/HDD)
-		_ = reporter.Report(ctx, plugin.ProgressReport{
-			Progress: 99.0,
-			Message:  "Uploading transcoded MP4 to storage...",
-			LogChunk: fmt.Sprintf("[Scratch Finalize] Uploading %s to %s\n", localFinalOutput, finalCleanRemoteFile),
-		})
-
-		if err := copyFile(ctx, localFinalOutput, finalCleanRemoteFile); err != nil {
+		if err := copyFileWithProgress(ctx, localFinalOutput, finalCleanRemoteFile, "Uploading transcoded MP4 to storage", reporter); err != nil {
 			return fmt.Errorf("failed to upload transcoded file to storage: %w", err)
 		}
 	} else {

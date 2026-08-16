@@ -126,11 +126,11 @@ taskengine-test:
 	@$(MAKE) -C src/taskengine test
 
 .PHONY: taskengine-server
-taskengine-server: taskengine-ensure-bin
+taskengine-server: taskengine-build
 	@./src/taskengine/bin/taskengine server --port $(PORT) --tasks-dir tasks
 
 .PHONY: taskengine-worker
-taskengine-worker: taskengine-ensure-bin
+taskengine-worker: taskengine-build
 	@ARGS="--server-url $(SERVER_URL)"; \
 	if [ -n "$(WORKER_ID)" ]; then ARGS="$$ARGS --worker-id $(WORKER_ID)"; fi; \
 	if [ "$(CONCURRENCY)" -gt 0 ]; then ARGS="$$ARGS --concurrency $(CONCURRENCY)"; fi; \
@@ -138,11 +138,11 @@ taskengine-worker: taskengine-ensure-bin
 	./src/taskengine/bin/taskengine worker $$ARGS
 
 .PHONY: taskengine-reload
-taskengine-reload: taskengine-ensure-bin
+taskengine-reload: taskengine-build
 	@./src/taskengine/bin/taskengine reload --server-url $(SERVER_URL)
 
 .PHONY: taskengine-status
-taskengine-status: taskengine-ensure-bin
+taskengine-status: taskengine-build
 	@./src/taskengine/bin/taskengine status --server-url $(SERVER_URL)
 
 .PHONY: taskengine-e2e

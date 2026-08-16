@@ -326,6 +326,7 @@ func (w *Worker) runTask(ctx context.Context, task *models.Task) {
 
 	reporter := &httpProgressReporter{
 		serverURL: w.cfg.ServerURL,
+		workerID:  w.cfg.WorkerID,
 		taskID:    task.ID,
 		client:    w.client,
 	}
@@ -384,18 +385,30 @@ func (w *Worker) failTask(ctx context.Context, taskID, errMsg string, canRetry b
 	}
 }
 
-// httpProgressReporter streams progress and logs over HTTP to server.
+// httpProgressReporter streams progress and logs over HTTP to server and prints terminal progress.
 type httpProgressReporter struct {
 	serverURL string
+	workerID  string
 	taskID    string
 	client    *http.Client
 	mu        sync.Mutex
 	lastProg  time.Time
+	lastLog   time.Time
 }
 
 func (r *httpProgressReporter) Report(ctx context.Context, report plugin.ProgressReport) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Terminal progress log (throttled to every 3s or on completion)
+	if report.Message != "" && (time.Since(r.lastLog) >= 3*time.Second || report.Progress >= 100.0) {
+		r.lastLog = time.Now()
+		speedStr := ""
+		if report.Speed != "" {
+			speedStr = fmt.Sprintf(" [%s]", report.Speed)
+		}
+		log.Printf("[Worker %s] [%.1f%%%s] %s", r.workerID, report.Progress, speedStr, report.Message)
+	}
 
 	// If log chunk present, send log
 	if report.LogChunk != "" {
