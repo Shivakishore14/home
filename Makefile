@@ -109,6 +109,10 @@ WORKER_ID ?=
 CONCURRENCY ?= 0
 PORT ?= 8080
 
+.PHONY: taskengine-ensure-bin
+taskengine-ensure-bin:
+	@$(MAKE) -C src/taskengine ensure-bin SERVER_URL=$(SERVER_URL)
+
 .PHONY: taskengine-build
 taskengine-build:
 	@echo "==> Building TaskEngine..."
@@ -120,22 +124,22 @@ taskengine-test:
 	@$(MAKE) -C src/taskengine test
 
 .PHONY: taskengine-server
-taskengine-server: taskengine-build
+taskengine-server: taskengine-ensure-bin
 	@./src/taskengine/bin/taskengine server --port $(PORT) --tasks-dir tasks
 
 .PHONY: taskengine-worker
-taskengine-worker: taskengine-build
+taskengine-worker: taskengine-ensure-bin
 	@ARGS="--server-url $(SERVER_URL)"; \
 	if [ -n "$(WORKER_ID)" ]; then ARGS="$$ARGS --worker-id $(WORKER_ID)"; fi; \
 	if [ "$(CONCURRENCY)" -gt 0 ]; then ARGS="$$ARGS --concurrency $(CONCURRENCY)"; fi; \
 	./src/taskengine/bin/taskengine worker $$ARGS
 
 .PHONY: taskengine-reload
-taskengine-reload: taskengine-build
+taskengine-reload: taskengine-ensure-bin
 	@./src/taskengine/bin/taskengine reload --server-url $(SERVER_URL)
 
 .PHONY: taskengine-status
-taskengine-status: taskengine-build
+taskengine-status: taskengine-ensure-bin
 	@./src/taskengine/bin/taskengine status --server-url $(SERVER_URL)
 
 .PHONY: taskengine-e2e

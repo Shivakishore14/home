@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -75,6 +77,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/v1/tasks/{id}", s.handleGetTask)
 	s.mux.HandleFunc("GET /api/v1/tasks/{name}/assets", s.handleGetTaskAssets)
 	s.mux.HandleFunc("GET /api/v1/files/{path...}", s.handleGetFile)
+	s.mux.HandleFunc("GET /api/v1/binaries/{name}", s.handleGetBinary)
 
 	// SSE Real-time stream
 	s.mux.HandleFunc("GET /api/v1/events", s.handleSSE)
@@ -624,4 +627,31 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.ServeFile(w, r, absPath)
+}
+
+func (s *Server) handleGetBinary(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "missing binary name", http.StatusBadRequest)
+		return
+	}
+
+	cleanName := filepath.Base(name)
+	possiblePaths := []string{
+		filepath.Join("bin", cleanName),
+		filepath.Join("bin", "taskengine_"+cleanName),
+		filepath.Join("src", "taskengine", "bin", cleanName),
+		filepath.Join("src", "taskengine", "bin", "taskengine_"+cleanName),
+	}
+
+	for _, p := range possiblePaths {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", cleanName))
+			w.Header().Set("Content-Type", "application/octet-stream")
+			http.ServeFile(w, r, p)
+			return
+		}
+	}
+
+	http.Error(w, fmt.Sprintf("binary %q not found on server", cleanName), http.StatusNotFound)
 }
