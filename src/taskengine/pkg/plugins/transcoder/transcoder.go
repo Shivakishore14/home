@@ -420,11 +420,20 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 	args = append(args, "-c:v", params.TargetCodec)
 
 	if strings.Contains(params.TargetCodec, "videotoolbox") {
-		// Apple VideoToolbox hardware encoder
+		// Apple VideoToolbox hardware encoder (macOS)
 		args = append(args, "-q:v", strconv.Itoa(params.CRF*2), "-pix_fmt", "yuv420p")
 	} else if strings.Contains(params.TargetCodec, "nvenc") {
-		// NVIDIA NVENC hardware encoder
+		// NVIDIA NVENC hardware encoder (Linux / Windows)
 		args = append(args, "-cq", strconv.Itoa(params.CRF), "-preset", params.Preset, "-pix_fmt", "yuv420p")
+	} else if strings.Contains(params.TargetCodec, "vaapi") {
+		// Intel / AMD VAAPI hardware encoder (Linux)
+		args = append(args, "-qp", strconv.Itoa(params.CRF), "-pix_fmt", "yuv420p")
+	} else if strings.Contains(params.TargetCodec, "qsv") {
+		// Intel QuickSync Video encoder (Linux / Windows)
+		args = append(args, "-global_quality", strconv.Itoa(params.CRF), "-preset", params.Preset, "-pix_fmt", "yuv420p")
+	} else if strings.Contains(params.TargetCodec, "amf") {
+		// AMD AMF hardware encoder (Linux / Windows)
+		args = append(args, "-rc", "cqp", "-qp_p", strconv.Itoa(params.CRF), "-qp_i", strconv.Itoa(params.CRF), "-pix_fmt", "yuv420p")
 	} else {
 		// Standard libx264 (8-bit SDR, High Profile Level 4.1 for 100% universal hardware support)
 		args = append(args, "-crf", strconv.Itoa(params.CRF), "-preset", params.Preset, "-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1")
