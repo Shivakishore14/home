@@ -281,6 +281,9 @@ type TranscodeParams struct {
 type VideoTranscoderWorkerPlugin struct {
 	defaultFFmpeg  string
 	defaultFFprobe string
+	defaultCodec   string
+	defaultPreset  string
+	defaultCRF     int
 }
 
 func (w *VideoTranscoderWorkerPlugin) Name() string {
@@ -292,6 +295,9 @@ func (w *VideoTranscoderWorkerPlugin) Init(ctx context.Context, config json.RawM
 		var cfg struct {
 			FFmpegBinary  string `json:"ffmpeg_binary"`
 			FFprobeBinary string `json:"ffprobe_binary"`
+			TargetCodec   string `json:"target_codec"`
+			Preset        string `json:"preset"`
+			CRF           int    `json:"crf"`
 		}
 		_ = json.Unmarshal(config, &cfg)
 		if cfg.FFmpegBinary != "" {
@@ -299,6 +305,15 @@ func (w *VideoTranscoderWorkerPlugin) Init(ctx context.Context, config json.RawM
 		}
 		if cfg.FFprobeBinary != "" {
 			w.defaultFFprobe = cfg.FFprobeBinary
+		}
+		if cfg.TargetCodec != "" {
+			w.defaultCodec = cfg.TargetCodec
+		}
+		if cfg.Preset != "" {
+			w.defaultPreset = cfg.Preset
+		}
+		if cfg.CRF > 0 {
+			w.defaultCRF = cfg.CRF
 		}
 	}
 	if w.defaultFFmpeg == "" {
@@ -328,6 +343,17 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 	var params TranscodeParams
 	if len(payload.Params) > 0 {
 		_ = json.Unmarshal(payload.Params, &params)
+	}
+
+	// Worker-level hardware encoder configuration overrides task-level defaults
+	if w.defaultCodec != "" {
+		params.TargetCodec = w.defaultCodec
+	}
+	if w.defaultPreset != "" {
+		params.Preset = w.defaultPreset
+	}
+	if w.defaultCRF > 0 {
+		params.CRF = w.defaultCRF
 	}
 
 	if params.TargetCodec == "" {
@@ -403,6 +429,12 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 
 	// 2. Probe input duration
 	durationSec := getDuration(ctx, ffprobeBin, encodeInputPath)
+
+	_ = reporter.Report(ctx, plugin.ProgressReport{
+		Progress: 1.0,
+		Message:  fmt.Sprintf("Starting encode with [%s] (Preset: %s, CRF/CQ: %d)", params.TargetCodec, params.Preset, params.CRF),
+		LogChunk: fmt.Sprintf("[Transcoder] Launching FFmpeg with encoder %s (Preset: %s, CRF: %d)\n", params.TargetCodec, params.Preset, params.CRF),
+	})
 
 	// 3. Build FFmpeg command for 1080p Universal Direct Play
 	args := []string{
