@@ -1,0 +1,17 @@
+services:
+  taskengine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: taskengine:latest
+    container_name: taskengine
+    restart: unless-stopped
+    ports:
+      - "${TASKENGINE_PORT:-8080}:8080"
+    volumes:
+      - ./data:/app/data
+      - ./tasks:/app/tasks
+    environment:
+      - PORT=8080
+    networks:
+      - home-network

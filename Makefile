@@ -186,4 +186,49 @@ taskengine-e2e: taskengine-build
 taskengine-release:
 	@$(MAKE) -C src/taskengine cross-compile
 
+.PHONY: taskengine-export
+taskengine-export:
+	@mkdir -p backups data
+	@TS=$$(date +"%Y%m%d_%H%M%S"); \
+	OUT="backups/taskengine_export_$${TS}.tar.gz"; \
+	echo "==> Exporting TaskEngine state (database & config)..."; \
+	if [ -f "data/taskengine.db" ]; then \
+		if command -v sqlite3 >/dev/null 2>&1; then \
+			sqlite3 data/taskengine.db "VACUUM INTO 'data/taskengine_backup.db';"; \
+		else \
+			cp data/taskengine.db data/taskengine_backup.db; \
+		fi; \
+		tar -czf "$$OUT" tasks/ -C data taskengine_backup.db; \
+		rm -f data/taskengine_backup.db; \
+		echo " [✓] Export saved to: $$OUT"; \
+	else \
+		tar -czf "$$OUT" tasks/; \
+		echo " [✓] Export saved to: $$OUT (configs only, no db found)"; \
+	fi
+
+.PHONY: taskengine-import
+taskengine-import:
+	@if [ -z "$(FILE)" ]; then \
+		echo "ERROR: Please specify FILE=backups/taskengine_export_YYYYMMDD_HHMMSS.tar.gz"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(FILE)" ]; then \
+		echo "ERROR: Backup file '$(FILE)' not found."; \
+		exit 1; \
+	fi
+	@echo "==> Restoring TaskEngine state from $(FILE)..."
+	@mkdir -p data tasks
+	@TMPDIR=$$(mktemp -d); \
+	tar -xzf "$(FILE)" -C "$$TMPDIR"; \
+	if [ -f "$$TMPDIR/taskengine_backup.db" ]; then \
+		cp "$$TMPDIR/taskengine_backup.db" data/taskengine.db; \
+		echo " [✓] Restored database to data/taskengine.db"; \
+	fi; \
+	if [ -d "$$TMPDIR/tasks" ]; then \
+		cp -r "$$TMPDIR/tasks/"* tasks/; \
+		echo " [✓] Restored configuration to tasks/"; \
+	fi; \
+	rm -rf "$$TMPDIR"; \
+	echo " [✓] Restore completed successfully."
+
 
