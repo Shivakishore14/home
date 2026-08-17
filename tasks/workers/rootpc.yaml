@@ -1,7 +1,14 @@
 worker_id: "rootpc"
-max_concurrent_tasks: 2
+max_concurrent_tasks: 3
 enabled_plugins:
   - "video-transcoder"
 scratch_dir: "/tmp/taskengine_scratch"
 path_mappings:
   "/Volumes/drive001/media": "/mnt/macmini_media/media"
+plugin_configs:
+  video-transcoder:
+    target_codec: "h264_nvenc"
+    preset: "p5"
+    crf: 21
+    audio_bitrate: "192k"
+    container: "mp4"
