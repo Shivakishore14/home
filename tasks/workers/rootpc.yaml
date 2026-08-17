@@ -1,0 +1,7 @@
+worker_id: "rootpc"
+max_concurrent_tasks: 2
+enabled_plugins:
+  - "video-transcoder"
+scratch_dir: "/tmp/taskengine_scratch"
+path_mappings:
+  "/Volumes/drive001/media": "/mnt/macmini_media"
