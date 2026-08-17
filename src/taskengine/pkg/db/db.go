@@ -615,3 +615,21 @@ func (d *DB) GetStats(ctx context.Context) (Stats, error) {
 
 	return stats, nil
 }
+
+// RetryFailedTasks resets all FAILED tasks back to PENDING.
+func (d *DB) RetryFailedTasks(ctx context.Context) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	now := time.Now().UTC()
+	query := `
+	UPDATE tasks
+	SET status = 'PENDING', retry_count = 0, status_message = '', worker_id = NULL, progress = 0.0, speed = '', updated_at = ?
+	WHERE status = 'FAILED'
+	`
+	res, err := d.db.ExecContext(ctx, query, now)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

@@ -174,6 +174,10 @@ taskengine-reload: taskengine-build
 taskengine-status: taskengine-build
 	@./src/taskengine/bin/taskengine status --server-url $(SERVER_URL)
 
+.PHONY: taskengine-retry-failed
+taskengine-retry-failed: taskengine-build
+	@./src/taskengine/bin/taskengine retry-failed --server-url $(SERVER_URL)
+
 .PHONY: taskengine-e2e
 taskengine-e2e: taskengine-build
 	@$(MAKE) -C src/taskengine e2e

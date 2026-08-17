@@ -67,6 +67,7 @@ func (s *Server) setupRoutes() {
 
 	// Task endpoints
 	s.mux.HandleFunc("POST /api/v1/tasks/claim", s.handleClaimTask)
+	s.mux.HandleFunc("POST /api/v1/tasks/retry-failed", s.handleRetryFailedTasks)
 	s.mux.HandleFunc("POST /api/v1/tasks/{id}/progress", s.handleTaskProgress)
 	s.mux.HandleFunc("POST /api/v1/tasks/{id}/logs", s.handleTaskLog)
 	s.mux.HandleFunc("POST /api/v1/tasks/{id}/complete", s.handleCompleteTask)
@@ -514,6 +515,20 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(task)
+}
+
+func (s *Server) handleRetryFailedTasks(w http.ResponseWriter, r *http.Request) {
+	count, err := s.db.RetryFailedTasks(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.Broadcast("tasks_retried", map[string]interface{}{"count": count})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        "ok",
+		"retried_count": count,
+	})
 }
 
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {

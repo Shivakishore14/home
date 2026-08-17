@@ -54,6 +54,8 @@ func main() {
 		runWorker(os.Args[2:])
 	case "reload":
 		runReload(os.Args[2:])
+	case "retry-failed":
+		runRetryFailed(os.Args[2:])
 	case "status":
 		runStatus(os.Args[2:])
 	case "version", "--version", "-v":
@@ -222,4 +224,24 @@ func runStatus(args []string) {
 
 	body, _ := io.ReadAll(resp.Body)
 	fmt.Printf("Server Status (%s):\n%s\n", *serverURL, string(body))
+}
+
+func runRetryFailed(args []string) {
+	fs := flag.NewFlagSet("retry-failed", flag.ExitOnError)
+	serverURL := fs.String("server-url", "http://localhost:8080", "Server base URL")
+	_ = fs.Parse(args)
+
+	resp, err := http.Post(fmt.Sprintf("%s/api/v1/tasks/retry-failed", *serverURL), "application/json", nil)
+	if err != nil {
+		log.Fatalf("Failed to connect to server: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusOK {
+		fmt.Printf("Retry result: %s\n", string(body))
+	} else {
+		fmt.Printf("Retry failed (%d): %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
 }

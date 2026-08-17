@@ -83,6 +83,9 @@ reload: build
 status: build
 	./$(BINARY_NAME) status --server-url $(SERVER_URL)
 
+retry-failed: build
+	./$(BINARY_NAME) retry-failed --server-url $(SERVER_URL)
+
 e2e: build
 	./test_e2e.sh
 
