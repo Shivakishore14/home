@@ -77,6 +77,12 @@ run-worker: build
 	if [ -n "$(PLUGINS)" ]; then ARGS="$$ARGS --plugins $(PLUGINS)"; fi; \
 	./$(BINARY_NAME) worker $$ARGS
 
+run-producer: build
+	@ARGS="--server-url $(SERVER_URL) --tasks-dir ../../tasks"; \
+	if [ -n "$(INTERVAL)" ]; then ARGS="$$ARGS --interval $(INTERVAL)"; fi; \
+	if [ "$(ONCE)" = "true" ]; then ARGS="$$ARGS --once"; fi; \
+	./$(BINARY_NAME) producer $$ARGS
+
 reload: build
 	./$(BINARY_NAME) reload --server-url $(SERVER_URL)
 

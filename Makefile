@@ -166,6 +166,13 @@ taskengine-worker: taskengine-build
 	if [ -n "$(PLUGINS)" ]; then ARGS="$$ARGS --plugins $(PLUGINS)"; fi; \
 	./src/taskengine/bin/taskengine worker $$ARGS
 
+.PHONY: taskengine-producer
+taskengine-producer: taskengine-build
+	@ARGS="--server-url $(SERVER_URL) --tasks-dir tasks"; \
+	if [ -n "$(INTERVAL)" ]; then ARGS="$$ARGS --interval $(INTERVAL)"; fi; \
+	if [ "$(ONCE)" = "true" ]; then ARGS="$$ARGS --once"; fi; \
+	./src/taskengine/bin/taskengine producer $$ARGS
+
 .PHONY: taskengine-reload
 taskengine-reload: taskengine-build
 	@./src/taskengine/bin/taskengine reload --server-url $(SERVER_URL)

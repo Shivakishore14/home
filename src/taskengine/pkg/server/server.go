@@ -505,6 +505,20 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Idempotent duplicate prevention
+	if req.TargetFile != "" {
+		hasActive, err := s.db.HasPendingOrRunningTask(r.Context(), req.PluginName, req.TargetFile)
+		if err == nil && hasActive {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  "skipped",
+				"message": "task already pending or running",
+			})
+			return
+		}
+	}
+
 	task, err := s.db.CreateTask(r.Context(), req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

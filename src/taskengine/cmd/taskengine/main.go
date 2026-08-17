@@ -18,6 +18,7 @@ import (
 	"taskengine/pkg/plugin"
 	_ "taskengine/pkg/plugins/runner"
 	_ "taskengine/pkg/plugins/transcoder"
+	"taskengine/pkg/producer"
 	"taskengine/pkg/server"
 	"taskengine/pkg/worker"
 )
@@ -31,11 +32,13 @@ Usage:
   taskengine <command> [arguments]
 
 Commands:
-  server    Start the TaskEngine server (API, SQLite, Scheduler, Web UI)
-  worker    Start a TaskEngine worker node
-  reload    Trigger hot configuration reload on a running server
-  status    Check the status and stats of a running server
-  version   Display version information
+  server        Start the TaskEngine server (API, SQLite, Scheduler, Web UI)
+  worker        Start a TaskEngine worker node
+  producer      Start a local storage scanner / task producer node
+  reload        Trigger hot configuration reload on a running server
+  retry-failed  Reset all failed tasks to pending
+  status        Check the status and stats of a running server
+  version       Display version information
 
 Run 'taskengine <command> --help' for details on each command.`)
 }
@@ -52,6 +55,8 @@ func main() {
 		runServer(os.Args[2:])
 	case "worker":
 		runWorker(os.Args[2:])
+	case "producer":
+		runProducer(os.Args[2:])
 	case "reload":
 		runReload(os.Args[2:])
 	case "retry-failed":
@@ -243,5 +248,40 @@ func runRetryFailed(args []string) {
 	} else {
 		fmt.Printf("Retry failed (%d): %s\n", resp.StatusCode, string(body))
 		os.Exit(1)
+	}
+}
+
+func runProducer(args []string) {
+	fs := flag.NewFlagSet("producer", flag.ExitOnError)
+	serverURL := fs.String("server-url", "http://localhost:8080", "TaskEngine Server base URL")
+	tasksDir := fs.String("tasks-dir", "tasks", "Path to tasks configuration directory")
+	interval := fs.Duration("interval", 30*time.Second, "Scan interval (e.g. 30s, 1m, 5m)")
+	once := fs.Bool("once", false, "Run single scan and exit")
+	_ = fs.Parse(args)
+
+	resolvedTasksDir := *tasksDir
+	if _, err := os.Stat(resolvedTasksDir); os.IsNotExist(err) {
+		if _, err := os.Stat("../../tasks"); err == nil {
+			resolvedTasksDir = "../../tasks"
+		} else if _, err := os.Stat("../tasks"); err == nil {
+			resolvedTasksDir = "../tasks"
+		}
+	}
+
+	p, err := producer.New(producer.Config{
+		ServerURL: *serverURL,
+		TasksDir:  resolvedTasksDir,
+		Interval:  *interval,
+		Once:      *once,
+	}, plugin.DefaultRegistry)
+	if err != nil {
+		log.Fatalf("Failed to initialize producer: %v", err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := p.Run(ctx); err != nil {
+		log.Fatalf("Producer failed: %v", err)
 	}
 }
