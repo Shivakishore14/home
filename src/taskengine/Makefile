@@ -34,8 +34,6 @@ ensure-bin:
 	@mkdir -p bin
 	@if command -v go >/dev/null 2>&1; then \
 		go build -o $(BINARY_NAME) ./cmd/taskengine; \
-	elif [ -x "$(BINARY_NAME)" ]; then \
-		exit 0; \
 	elif [ -f "bin/taskengine_$(OS)_$(ARCH)" ]; then \
 		echo "==> Using pre-built binary for $(OS)/$(ARCH)..."; \
 		cp "bin/taskengine_$(OS)_$(ARCH)" $(BINARY_NAME); \
@@ -43,6 +41,8 @@ ensure-bin:
 	elif [ -n "$(SERVER_URL)" ] && curl -sSL -f "$(SERVER_URL)/api/v1/binaries/$(OS)_$(ARCH)" -o $(BINARY_NAME) 2>/dev/null; then \
 		echo "==> Downloaded TaskEngine binary for $(OS)/$(ARCH) from $(SERVER_URL)..."; \
 		chmod +x $(BINARY_NAME); \
+	elif [ -x "$(BINARY_NAME)" ]; then \
+		exit 0; \
 	else \
 		echo "ERROR: TaskEngine binary '$(BINARY_NAME)' not found."; \
 		echo "Go is not installed on this machine and could not download binary from SERVER_URL ($(SERVER_URL))."; \
