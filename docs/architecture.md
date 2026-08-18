@@ -117,3 +117,16 @@ make up
 - **Mosquitto & Zigbee2MQTT**: Add `compose/mosquitto.yml` and `compose/zigbee2mqtt.yml`. Zigbee2MQTT will communicate with Mosquitto internally via `mqtt://mosquitto:1883` on `home-network`.
 - **Node-RED / ESPHome**: Can easily join `home-network` and talk directly to Home Assistant.
 - **Ollama / Open WebUI**: Ollama can run with CPU or utilize macOS GPU natively if run outside Docker. If run inside Docker, use CPU-based container and point Open WebUI to `http://host.docker.internal:11434`.
+
+---
+
+## 5. VPS Stack (Separate from the Mac mini)
+
+The public VPS is a different machine with different constraints (no external APFS drive, no macOS PUID/GID mapping, publicly reachable ports), so it is deliberately **not** merged into the Mac mini's `docker-compose.yml` + `compose/` + `.env` system. It lives entirely in [docker-compose.vps.yml](file:///Users/server/github/home/docker-compose.vps.yml) at the repo root, with its own `vps-network` bridge network and, if needed, its own `.env` on that machine (never shared with the Mac mini's `.env`).
+
+It currently defines two services: `taskengine` (server mode, its own DB/tasks bind mounts) and `ntfy` (push notifications, with `deny-all` default auth since the box is public).
+
+This single-file approach is intentional while the stack is small. Once more services are added to the VPS, apply the same modularization used for the Mac mini:
+1. Move each service out of `docker-compose.vps.yml` into `compose/<service>.yml`.
+2. Keep a minimal `docker-compose.vps.yml` (or reuse the root `docker-compose.yml`) as the base network declaration.
+3. Merge files via `COMPOSE_FILE` in the VPS's `.env`, exactly as described in Section 3 above.

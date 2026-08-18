@@ -13,9 +13,10 @@ All infrastructure settings, service relationships, and network environments are
 4. [Quick Start (Installation)](#quick-start-installation)
 5. [Operational Commands Reference](#operational-commands-reference)
 6. [Service Documentation](#service-documentation)
-7. [Backup and Restoration](#backup-and-restoration)
-8. [Adding New Services](#adding-new-services)
-9. [Troubleshooting & macOS Notes](#troubleshooting--macos-notes)
+7. [VPS Stack](#-vps-stack)
+8. [Backup and Restoration](#backup-and-restoration)
+9. [Adding New Services](#adding-new-services)
+10. [Troubleshooting & macOS Notes](#troubleshooting--macos-notes)
 
 ---
 
@@ -24,6 +25,8 @@ All infrastructure settings, service relationships, and network environments are
 Services are split into isolated, service-specific files located in the [compose/](file:///Users/server/github/home/compose/) folder. The base configurations (such as global networks) are declared in the root [docker-compose.yml](file:///Users/server/github/home/docker-compose.yml). 
 
 Environment variables are loaded from a local `.env` file created from [.env.example](file:///Users/server/github/home/.env.example) during initialization. A custom internal bridge network named `home-network` links all services.
+
+A separate public VPS node is defined in [docker-compose.vps.yml](file:///Users/server/github/home/docker-compose.vps.yml) — it runs TaskEngine (server mode) and ntfy on its own `vps-network`, independent of the Mac mini stack. It's kept as a single file for now; once more VPS services are added, it will be split into `compose/<service>.yml` files following the same pattern as the Mac mini stack.
 
 > [!NOTE]
 > For a technical deep-dive into design decisions, network topologies, and system scaling plans, see [docs/architecture.md](file:///Users/server/github/home/docs/architecture.md).
@@ -41,6 +44,7 @@ home/
 ├── Makefile                 # Task automation interface
 ├── .env.example             # Environment configuration template
 ├── docker-compose.yml       # Base docker-compose configuration
+├── docker-compose.vps.yml   # Standalone VPS stack (TaskEngine + ntfy)
 │
 ├── compose/                 # Modular service compose files
 │   ├── jellyfin.yml         # Jellyfin media player definition
@@ -110,6 +114,15 @@ make macmini
 ```bash
 # Start the TaskEngine worker on MacBook Air (connecting to Mac mini server URL)
 make macbookair SERVER_URL=http://<macmini-ip>:8080
+```
+
+### 3. VPS (Public Node — TaskEngine + ntfy)
+```bash
+# On the VPS, clone the repo, then bring up its own standalone stack
+docker compose -f docker-compose.vps.yml up -d --build
+
+# Create the first ntfy admin user (required once — default access is deny-all)
+docker compose -f docker-compose.vps.yml exec ntfy ntfy user add --role=admin <username>
 ```
 
 ---
@@ -184,6 +197,27 @@ The [Makefile](file:///Users/server/github/home/Makefile) acts as the unified CL
 - **Host Port**: `8123`
 - **Config Storage Path**: `/Volumes/drive001/docker/homeassistant`
 - **USB Passthrough (Zigbee/Z-Wave)**: macOS Docker does not support native mapping of USB serial dongles. We recommend using a Network-Attached Coordinator (e.g. SLZB-06 over Ethernet) or implementing the USB/IP protocol inside Docker Desktop. See [docs/macos.md](file:///Users/server/github/home/docs/macos.md) for options.
+
+---
+
+## 🌐 VPS Stack
+
+A separate, standalone stack for a public VPS, defined entirely in [docker-compose.vps.yml](file:///Users/server/github/home/docker-compose.vps.yml). It does not share the `home-network` or `.env` with the Mac mini stack — the VPS keeps its own `.env` (if you need to override defaults) and is managed with plain `docker compose -f docker-compose.vps.yml <cmd>` rather than the Makefile targets above.
+
+### TaskEngine (VPS, server mode)
+- **Compose Path**: [docker-compose.vps.yml](file:///Users/server/github/home/docker-compose.vps.yml)
+- **Host Port**: `${TASKENGINE_PORT:-8080}`
+- **Data**: `./data` and `./tasks` (bind-mounted from the repo checkout on the VPS), independent of the Mac mini's TaskEngine server/database.
+
+### ntfy (Push Notifications)
+- **Compose Path**: [docker-compose.vps.yml](file:///Users/server/github/home/docker-compose.vps.yml)
+- **Host Port**: `${NTFY_PORT:-8090}`
+- **Data**: `./data/ntfy` — holds the message cache, attachment cache, and the auth database.
+- **Auth**: `NTFY_AUTH_DEFAULT_ACCESS=deny-all` — the topic space is closed by default since this is exposed on the public internet. Create users with `docker compose -f docker-compose.vps.yml exec ntfy ntfy user add --role=admin <username>`.
+- **Base URL**: set `NTFY_BASE_URL` in the VPS's `.env` to your real domain once one is pointed at the box (defaults to `http://localhost:8090`).
+
+> [!NOTE]
+> Once more services are added to the VPS, split `docker-compose.vps.yml` into `compose/<service>.yml` files and merge them via `COMPOSE_FILE`, matching the Mac mini pattern described in [docs/architecture.md](file:///Users/server/github/home/docs/architecture.md).
 
 ---
 

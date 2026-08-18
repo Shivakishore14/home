@@ -18,3 +18,6 @@ jobs:
 
       - name: Validate Docker Compose Config
         run: docker compose config
+
+      - name: Validate VPS Docker Compose Config
+        run: docker compose -f docker-compose.vps.yml config
