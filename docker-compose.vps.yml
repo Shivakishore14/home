@@ -20,8 +20,8 @@ services:
     image: taskengine:latest
     container_name: taskengine
     restart: unless-stopped
-    ports:
-      - "${TASKENGINE_PORT:-8080}:8080"
+    expose:
+      - "8080"
     volumes:
       - ./data:/app/data
       - ./tasks:/app/tasks
@@ -38,7 +38,7 @@ services:
     command: serve
     environment:
       - TZ=${TZ:-UTC}
-      - NTFY_BASE_URL=${NTFY_BASE_URL:-http://localhost:${NTFY_PORT:-8090}}
+      - NTFY_BASE_URL=${NTFY_BASE_URL}
       - NTFY_LISTEN_HTTP=:80
       - NTFY_CACHE_FILE=/var/lib/ntfy/cache.db
       - NTFY_AUTH_FILE=/var/lib/ntfy/auth.db
@@ -46,8 +46,8 @@ services:
       - NTFY_ATTACHMENT_CACHE_DIR=/var/lib/ntfy/attachments
       - NTFY_ENABLE_LOGIN=true
       - NTFY_ENABLE_SIGNUP=false
-    ports:
-      - "${NTFY_PORT:-8090}:80"
+    expose:
+      - "80"
     volumes:
       - ./data/ntfy:/var/lib/ntfy
     healthcheck:
