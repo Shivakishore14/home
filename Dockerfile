@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for TaskEngine Server
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /src
 RUN apk add --no-cache git make ca-certificates
