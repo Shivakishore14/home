@@ -86,7 +86,7 @@ services:
       - "8428"
     volumes:
       - ./data/victoriametrics:/storage
-      - ${PRIVATE_REPO_DIR:-./private}/monitoring/scrape.yml:/etc/victoriametrics/scrape.yml:ro
+      - ./private/monitoring/scrape.yml:/etc/victoriametrics/scrape.yml:ro
     deploy:
       resources:
         limits:
@@ -168,8 +168,8 @@ services:
       - ./data/grafana:/var/lib/grafana
       - ./configs/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./configs/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ${PRIVATE_REPO_DIR:-./private}/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - ${PRIVATE_REPO_DIR:-./private}/grafana/alerting:/etc/grafana/provisioning/alerting:ro
+      - ./private/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./private/grafana/alerting:/etc/grafana/provisioning/alerting:ro
     depends_on:
       - victoriametrics
       - victorialogs
