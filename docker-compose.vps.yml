@@ -84,8 +84,6 @@ services:
       - "--promscrape.configCheckInterval=30s"
     expose:
       - "8428"
-    ports:
-      - "127.0.0.1:${VICTORIAMETRICS_PORT:-8428}:8428"
     volumes:
       - ./data/victoriametrics:/storage
       - ${PRIVATE_REPO_DIR:-./private}/monitoring/scrape.yml:/etc/victoriametrics/scrape.yml:ro
@@ -111,8 +109,6 @@ services:
       - "--memory.allowedBytes=128MB"
     expose:
       - "9428"
-    ports:
-      - "127.0.0.1:${VICTORIALOGS_PORT:-9428}:9428"
     volumes:
       - ./data/victorialogs:/vlogs
     deploy:
@@ -162,8 +158,6 @@ services:
     restart: unless-stopped
     expose:
       - "3000"
-    ports:
-      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     environment:
       - TZ=${TZ:-UTC}
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
