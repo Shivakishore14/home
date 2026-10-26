@@ -162,6 +162,7 @@ services:
       dockerfile: configs/grafana/Dockerfile
     image: vps-grafana:latest
     container_name: grafana
+    user: "0"
     restart: unless-stopped
     expose:
       - "3000"
@@ -173,6 +174,12 @@ services:
       - GF_INSTALL_PLUGINS=victoriametrics-logs-datasource
     volumes:
       - ./data/grafana:/var/lib/grafana
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 http://localhost:3000/api/health -O - | grep -q 'ok' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     depends_on:
       - victoriametrics
       - victorialogs
