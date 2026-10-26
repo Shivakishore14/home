@@ -28,6 +28,7 @@ services:
     environment:
       - PORT=8080
       - TZ=${TZ:-UTC}
+      - TASKENGINE_API_KEY=${TASKENGINE_API_KEY}
     networks:
       - vps-network
 
@@ -63,3 +64,130 @@ services:
         max-file: "3"
     networks:
       - vps-network
+
+  # ============================================================================
+  # Observability Stack (Ultra-Low-Spec: VictoriaMetrics + VictoriaLogs + Vector + Grafana)
+  # ============================================================================
+  # Private scrape targets & dashboards are mounted from PRIVATE_REPO_DIR
+  # (defaults to ../home-private) so no internal service names leak in this repo.
+  # ============================================================================
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:${VICTORIAMETRICS_VERSION:-v1.112.0}
+    container_name: victoriametrics
+    restart: unless-stopped
+    command:
+      - "--storageDataPath=/storage"
+      - "--retentionPeriod=${METRICS_RETENTION:-14d}"
+      - "--memory.allowedBytes=128MB"
+      - "--promscrape.config=/etc/victoriametrics/scrape.yml"
+      - "--promscrape.configCheckInterval=30s"
+    expose:
+      - "8428"
+    ports:
+      - "127.0.0.1:${VICTORIAMETRICS_PORT:-8428}:8428"
+    volumes:
+      - ./data/victoriametrics:/storage
+      - ${PRIVATE_REPO_DIR:-../home-private}/monitoring/scrape.yml:/etc/victoriametrics/scrape.yml:ro
+    deploy:
+      resources:
+        limits:
+          memory: 180M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - vps-network
+
+  victorialogs:
+    image: victoriametrics/victoria-logs:${VICTORIALOGS_VERSION:-v1.15.0-victorialogs}
+    container_name: victorialogs
+    restart: unless-stopped
+    command:
+      - "--storageDataPath=/vlogs"
+      - "--retentionPeriod=${LOGS_RETENTION:-7d}"
+      - "--memory.allowedBytes=128MB"
+    expose:
+      - "9428"
+    ports:
+      - "127.0.0.1:${VICTORIALOGS_PORT:-9428}:9428"
+    volumes:
+      - ./data/victorialogs:/vlogs
+    deploy:
+      resources:
+        limits:
+          memory: 180M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - vps-network
+
+  vector:
+    image: timberio/vector:${VECTOR_VERSION:-0.45.0-alpine}
+    container_name: vector
+    restart: unless-stopped
+    command: ["--config", "/etc/vector/vector.yaml"]
+    environment:
+      - PROCFS_ROOT=/host/proc
+      - SYSFS_ROOT=/host/sys
+    volumes:
+      - ./configs/vector/vector.yaml:/etc/vector/vector.yaml:ro
+      - ./data/vector:/var/lib/vector
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    depends_on:
+      - victoriametrics
+      - victorialogs
+    deploy:
+      resources:
+        limits:
+          memory: 80M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - vps-network
+
+  grafana:
+    image: grafana/grafana:${GRAFANA_VERSION:-11.5.2}
+    container_name: grafana
+    restart: unless-stopped
+    expose:
+      - "3000"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - TZ=${TZ:-UTC}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=victoriametrics-logs-datasource
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+      - ./configs/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./configs/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ${PRIVATE_REPO_DIR:-../home-private}/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ${PRIVATE_REPO_DIR:-../home-private}/grafana/alerting:/etc/grafana/provisioning/alerting:ro
+    depends_on:
+      - victoriametrics
+      - victorialogs
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - vps-network
+

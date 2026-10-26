@@ -1,0 +1,75 @@
+# ==============================================================================
+# Vector Telemetry Collector Configuration (Ultra-Lightweight)
+# ==============================================================================
+# Collects host metrics (CPU, Memory, Disk, Network) and Docker container logs
+# and ships them to VictoriaMetrics and VictoriaLogs.
+#
+# Application-specific Prometheus scrape targets are intentionally NOT stored
+# here so this public repo never exposes private service names. Instead, app
+# scrape targets live in `home-private/monitoring/scrape.yml` and are scraped
+# directly by VictoriaMetrics.
+# ==============================================================================
+
+data_dir: "/var/lib/vector"
+
+sources:
+  # 1. Host-level VPS metrics (CPU, RAM, filesystem, disk I/O, network)
+  host_metrics:
+    type: host_metrics
+    scrape_interval_secs: 15
+    collectors:
+      - cpu
+      - disk
+      - filesystem
+      - load
+      - host
+      - memory
+      - network
+
+  # 2. Vector internal metrics (to monitor collector overhead)
+  internal_metrics:
+    type: internal_metrics
+    scrape_interval_secs: 30
+
+  # 3. Docker container logs (auto-discovers running containers via docker.sock)
+  docker_logs:
+    type: docker_logs
+    exclude_containers:
+      - "vector"
+
+transforms:
+  # Normalize Docker log fields for clean querying in VictoriaLogs
+  enrich_logs:
+    type: remap
+    inputs:
+      - docker_logs
+    source: |
+      .app = .container_name
+      del(.source_type)
+
+sinks:
+  # Ship all host & collector metrics to VictoriaMetrics
+  victoriametrics:
+    type: prometheus_remote_write
+    inputs:
+      - host_metrics
+      - internal_metrics
+    endpoint: "http://victoriametrics:8428/api/v1/write"
+    healthcheck:
+      enabled: false
+
+  # Ship all container logs to VictoriaLogs via its Elasticsearch bulk ingest API
+  victorialogs:
+    type: elasticsearch
+    inputs:
+      - enrich_logs
+    endpoints:
+      - "http://victorialogs:9428/insert/elasticsearch/"
+    api_version: v8
+    compression: gzip
+    healthcheck:
+      enabled: false
+    query:
+      _msg_field: "message"
+      _time_field: "timestamp"
+      _stream_fields: "app,container_name,stream"

@@ -1,0 +1,21 @@
+# ==============================================================================
+# Grafana Provisioned Dashboards
+# ==============================================================================
+# Watches /var/lib/grafana/dashboards (mounted from the private repository)
+# every 10 seconds and automatically syncs folders and dashboard JSON files.
+# ==============================================================================
+
+apiVersion: 1
+
+providers:
+  - name: "Private Code-Driven Dashboards"
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: true

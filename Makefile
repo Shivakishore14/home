@@ -85,6 +85,11 @@ help:
 	@echo " Machine Entrypoints:"
 	@echo "   make macmini       - Start Mac mini services (Docker Compose + TaskEngine server)"
 	@echo "   make macbookair    - Start MacBook Air TaskEngine worker"
+	@echo "   make vps-up        - Build dashboards and start VPS stack (with observability)"
+	@echo "   make vps-down      - Stop VPS stack"
+	@echo "   make vps-status    - View VPS container health and status"
+	@echo "   make vps-logs      - Tail VPS stack logs"
+	@echo "   make dashboards    - Compile Grafana dashboards from code in home-private"
 	@echo ""
 	@echo " Available commands:"
 	@echo "   make init          - Initialize host directories & .env file"
@@ -112,6 +117,7 @@ SERVER_URL ?= http://localhost:8080
 WORKER_ID ?=
 CONCURRENCY ?= 0
 PORT ?= 8080
+PRIVATE_REPO_DIR ?= ../home-private
 
 PLUGINS ?=
 
@@ -135,6 +141,31 @@ macbookair macbook-air: taskengine-build
 	if [ "$(CONCURRENCY)" -gt 0 ]; then ARGS="$$ARGS --concurrency $(CONCURRENCY)"; fi; \
 	if [ -n "$(PLUGINS)" ]; then ARGS="$$ARGS --plugins $(PLUGINS)"; fi; \
 	./src/taskengine/bin/taskengine worker $$ARGS
+
+.PHONY: dashboards
+dashboards:
+	@echo "==> Generating Grafana dashboards from $(PRIVATE_REPO_DIR)..."
+	@python3 $(PRIVATE_REPO_DIR)/generator/build_dashboards.py
+
+.PHONY: vps-up
+vps-up: dashboards
+	@echo "==> [VPS] Starting VPS services & observability stack..."
+	docker compose -f docker-compose.vps.yml up -d
+
+.PHONY: vps-down
+vps-down:
+	@echo "==> [VPS] Stopping VPS services..."
+	docker compose -f docker-compose.vps.yml down
+
+.PHONY: vps-status
+vps-status:
+	@echo "==> [VPS] Container Status:"
+	docker compose -f docker-compose.vps.yml ps --all
+
+.PHONY: vps-logs
+vps-logs:
+	@echo "==> [VPS] Viewing logs (Ctrl+C to exit)..."
+	docker compose -f docker-compose.vps.yml logs -f
 
 # ==============================================================================
 # TaskEngine Targets
