@@ -1,8 +1,8 @@
 # ==============================================================================
 # Grafana Provisioned Dashboards
 # ==============================================================================
-# Watches /var/lib/grafana/dashboards (mounted from the private repository)
-# every 10 seconds and automatically syncs folders and dashboard JSON files.
+# Loads dashboards from /etc/grafana/dashboards (baked in from ./private/grafana/dashboards
+# during image build) and automatically organizes folders from directory structure.
 # ==============================================================================
 
 apiVersion: 1
@@ -17,5 +17,5 @@ providers:
     updateIntervalSeconds: 10
     allowUiUpdates: true
     options:
-      path: /var/lib/grafana/dashboards
+      path: /etc/grafana/dashboards
       foldersFromFilesStructure: true

@@ -73,7 +73,10 @@ services:
   # ============================================================================
 
   victoriametrics:
-    image: victoriametrics/victoria-metrics:${VICTORIAMETRICS_VERSION:-v1.112.0}
+    build:
+      context: .
+      dockerfile: configs/victoriametrics/Dockerfile
+    image: vps-victoriametrics:latest
     container_name: victoriametrics
     restart: unless-stopped
     command:
@@ -86,7 +89,6 @@ services:
       - "8428"
     volumes:
       - ./data/victoriametrics:/storage
-      - ./private/monitoring/scrape.yml:/etc/victoriametrics/scrape.yml:ro
     deploy:
       resources:
         limits:
@@ -124,7 +126,10 @@ services:
       - vps-network
 
   vector:
-    image: timberio/vector:${VECTOR_VERSION:-0.45.0-alpine}
+    build:
+      context: .
+      dockerfile: configs/vector/Dockerfile
+    image: vps-vector:latest
     container_name: vector
     restart: unless-stopped
     command: ["--config", "/etc/vector/vector.yaml"]
@@ -132,7 +137,6 @@ services:
       - PROCFS_ROOT=/host/proc
       - SYSFS_ROOT=/host/sys
     volumes:
-      - ./configs/vector/vector.yaml:/etc/vector/vector.yaml:ro
       - ./data/vector:/var/lib/vector
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /proc:/host/proc:ro
@@ -153,7 +157,10 @@ services:
       - vps-network
 
   grafana:
-    image: grafana/grafana:${GRAFANA_VERSION:-11.5.2}
+    build:
+      context: .
+      dockerfile: configs/grafana/Dockerfile
+    image: vps-grafana:latest
     container_name: grafana
     restart: unless-stopped
     expose:
@@ -166,10 +173,6 @@ services:
       - GF_INSTALL_PLUGINS=victoriametrics-logs-datasource
     volumes:
       - ./data/grafana:/var/lib/grafana
-      - ./configs/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./configs/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./private/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - ./private/grafana/alerting:/etc/grafana/provisioning/alerting:ro
     depends_on:
       - victoriametrics
       - victorialogs
