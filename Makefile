@@ -117,7 +117,7 @@ SERVER_URL ?= http://localhost:8080
 WORKER_ID ?=
 CONCURRENCY ?= 0
 PORT ?= 8080
-PRIVATE_REPO_DIR ?= ../home-private
+PRIVATE_REPO_DIR ?= ./private
 
 PLUGINS ?=
 

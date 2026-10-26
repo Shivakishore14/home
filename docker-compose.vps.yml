@@ -69,7 +69,7 @@ services:
   # Observability Stack (Ultra-Low-Spec: VictoriaMetrics + VictoriaLogs + Vector + Grafana)
   # ============================================================================
   # Private scrape targets & dashboards are mounted from PRIVATE_REPO_DIR
-  # (defaults to ../home-private) so no internal service names leak in this repo.
+  # (defaults to ./private) so no internal service names leak in this repo.
   # ============================================================================
 
   victoriametrics:
@@ -88,7 +88,7 @@ services:
       - "127.0.0.1:${VICTORIAMETRICS_PORT:-8428}:8428"
     volumes:
       - ./data/victoriametrics:/storage
-      - ${PRIVATE_REPO_DIR:-../home-private}/monitoring/scrape.yml:/etc/victoriametrics/scrape.yml:ro
+      - ${PRIVATE_REPO_DIR:-./private}/monitoring/scrape.yml:/etc/victoriametrics/scrape.yml:ro
     deploy:
       resources:
         limits:
@@ -174,8 +174,8 @@ services:
       - ./data/grafana:/var/lib/grafana
       - ./configs/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./configs/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ${PRIVATE_REPO_DIR:-../home-private}/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - ${PRIVATE_REPO_DIR:-../home-private}/grafana/alerting:/etc/grafana/provisioning/alerting:ro
+      - ${PRIVATE_REPO_DIR:-./private}/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ${PRIVATE_REPO_DIR:-./private}/grafana/alerting:/etc/grafana/provisioning/alerting:ro
     depends_on:
       - victoriametrics
       - victorialogs
