@@ -52,11 +52,11 @@ func TestMoveSidecarsAndPrune(t *testing.T) {
 	}
 
 	pruneEmptyDirs(src, "_incoming")
-	if _, err := os.Stat(filepath.Join(root, "_incoming", "Movies")); !os.IsNotExist(err) {
-		t.Errorf("empty incoming subdirs not pruned")
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Errorf("empty title dir not pruned")
 	}
-	if _, err := os.Stat(filepath.Join(root, "_incoming")); err != nil {
-		t.Errorf("incoming root should be kept: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "_incoming", "Movies")); err != nil {
+		t.Errorf("library drop folder _incoming/Movies should be kept: %v", err)
 	}
 }
 
@@ -102,8 +102,11 @@ func TestExecuteIncomingToLibrary(t *testing.T) {
 		if !readTranscodeCache(lib)["foo.mp4"] {
 			t.Errorf("scratch=%v: foo.mp4 not in library .transcode_cache", scratch)
 		}
-		if _, err := os.Stat(filepath.Join(root, "_incoming", "Movies")); !os.IsNotExist(err) {
-			t.Errorf("scratch=%v: incoming dirs not cleaned up", scratch)
+		if _, err := os.Stat(src); !os.IsNotExist(err) {
+			t.Errorf("scratch=%v: incoming title dir not cleaned up", scratch)
+		}
+		if _, err := os.Stat(filepath.Join(root, "_incoming", "Movies")); err != nil {
+			t.Errorf("scratch=%v: drop folder removed: %v", scratch, err)
 		}
 	}
 }

@@ -729,11 +729,12 @@ func moveSidecars(src, dst, base string) {
 	}
 }
 
-// pruneEmptyDirs removes dir and its empty parents, stopping at (and keeping)
-// the incoming staging root.
+// pruneEmptyDirs removes dir and its empty parents, keeping the incoming
+// staging root and its direct children (the per-library drop folders, e.g.
+// _incoming/Movies).
 func pruneEmptyDirs(dir, incoming string) {
 	for {
-		if filepath.Base(dir) == incoming || dir == filepath.Dir(dir) {
+		if filepath.Base(dir) == incoming || filepath.Base(filepath.Dir(dir)) == incoming || dir == filepath.Dir(dir) {
 			return
 		}
 		if err := os.Remove(dir); err != nil { // fails if not empty
