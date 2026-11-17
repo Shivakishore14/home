@@ -1,4 +1,6 @@
 # ==============================================================================
+# NOTE: Retired 2026-11-18 in favour of TaskEngine (src/taskengine) for transcoding.
+# Not part of the active stack; kept for reference. Add to COMPOSE_FILE to re-enable.
 # Unmanic Transcoding Automation Service Definition
 # ==============================================================================
 
