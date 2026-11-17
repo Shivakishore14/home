@@ -32,6 +32,8 @@ type Server struct {
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+
+	jellyfin *jellyfinNotifier
 }
 
 // NewServer initializes a new Server instance.
@@ -47,6 +49,7 @@ func NewServer(cfg *config.Manager, database *db.DB, registry *plugin.Registry) 
 		mux:            http.NewServeMux(),
 		sseClients:     make(map[chan models.SSEEvent]bool),
 		stopChan:       make(chan struct{}),
+		jellyfin:       newJellyfinNotifierFromEnv(),
 	}
 
 	s.setupRoutes()
@@ -457,6 +460,10 @@ func (s *Server) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
 		"id":      taskID,
 		"message": msg,
 	})
+
+	if t, err := s.db.GetTask(r.Context(), taskID); err == nil && t.PluginName == "video-transcoder" {
+		s.jellyfin.Schedule()
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status": "ok"}`))
 }

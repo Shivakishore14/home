@@ -3,11 +3,15 @@ plugin_name: "video-transcoder"
 schedule: "*/15 * * * *"
 enabled: true
 priority: 10
+# New media is dropped into media/_incoming/<Library>/... (not a Jellyfin library).
+# Once transcoded, the .mp4 (+ matching subtitles/.nfo) lands in media/<Library>/...
+# and the original is deleted, so Jellyfin only ever sees finished files.
 scanner:
-  directory: "/Volumes/drive001/media"
+  directory: "/Volumes/drive001/media/_incoming"
   target_extensions: [".mkv", ".mp4", ".mov", ".avi", ".ts", ".m2ts", ".wmv", ".flv"]
 params:
-  directory: "/Volumes/drive001/media"
+  directory: "/Volumes/drive001/media/_incoming"
+  incoming_dir: "_incoming"
   target_codec: "libx264"
   target_height: 1080
   crf: 21

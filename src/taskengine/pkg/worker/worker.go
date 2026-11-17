@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -346,10 +347,19 @@ func (w *Worker) runTask(ctx context.Context, task *models.Task) {
 	}
 
 	err := p.Execute(ctx, payload, reporter)
-	if err != nil {
+	var skipErr *plugin.SkipError
+	var permErr *plugin.PermanentError
+	switch {
+	case errors.As(err, &skipErr):
+		log.Printf("[Worker %s] Task %s skipped: %s", w.cfg.WorkerID, task.ID, skipErr.Reason)
+		w.completeTask(ctx, task.ID, "Skipped: "+skipErr.Reason)
+	case errors.As(err, &permErr):
+		log.Printf("[Worker %s] Task %s failed permanently (no retry): %v", w.cfg.WorkerID, task.ID, err)
+		w.failTask(ctx, task.ID, err.Error(), false)
+	case err != nil:
 		log.Printf("[Worker %s] Task %s failed: %v", w.cfg.WorkerID, task.ID, err)
 		w.failTask(ctx, task.ID, err.Error(), true)
-	} else {
+	default:
 		log.Printf("[Worker %s] Task %s completed successfully", w.cfg.WorkerID, task.ID)
 		w.completeTask(ctx, task.ID, "Task completed successfully")
 	}

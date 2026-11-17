@@ -28,6 +28,33 @@ type ProgressReporter interface {
 	Report(ctx context.Context, report ProgressReport) error
 }
 
+// SkipError is returned by a WorkerPlugin when there is nothing left to do for
+// the task (e.g. the work was already done). The worker marks the task
+// COMPLETED with the given reason instead of failing it.
+type SkipError struct{ Reason string }
+
+func (e *SkipError) Error() string { return "skipped: " + e.Reason }
+
+// Skip returns a SkipError with a formatted reason.
+func Skip(format string, args ...any) error {
+	return &SkipError{Reason: fmt.Sprintf(format, args...)}
+}
+
+// PermanentError wraps an error that retrying cannot fix. The worker fails the
+// task without consuming retries.
+type PermanentError struct{ Err error }
+
+func (e *PermanentError) Error() string { return e.Err.Error() }
+func (e *PermanentError) Unwrap() error { return e.Err }
+
+// Permanent marks err as non-retryable.
+func Permanent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &PermanentError{Err: err}
+}
+
 // ServerPlugin generates or schedules tasks on the server.
 type ServerPlugin interface {
 	Name() string

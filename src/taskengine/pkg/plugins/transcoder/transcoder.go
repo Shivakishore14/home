@@ -20,6 +20,10 @@ import (
 
 const TranscodeCacheFileName = ".transcode_cache"
 
+// incomingSettleTime is how long a file in the incoming staging area must be
+// unmodified before the scanner queues it.
+var incomingSettleTime = 5 * time.Minute
+
 func init() {
 	plugin.RegisterServer(&VideoTranscoderServerPlugin{})
 	plugin.RegisterWorker(&VideoTranscoderWorkerPlugin{})
@@ -142,6 +146,10 @@ type VideoTranscoderServerPlugin struct {
 	Preset           string   `json:"preset"`
 	AudioBitrate     string   `json:"audio_bitrate"`
 	Container        string   `json:"container"`
+	// IncomingDir, if set, is a path segment (e.g. "_incoming") marking a staging
+	// area. Files under <root>/<IncomingDir>/... are written to <root>/... once
+	// transcoded, so media servers only ever see finished files.
+	IncomingDir string `json:"incoming_dir"`
 }
 
 func (s *VideoTranscoderServerPlugin) Name() string {
@@ -222,6 +230,14 @@ func (s *VideoTranscoderServerPlugin) GenerateTasks(ctx context.Context) ([]plug
 				return nil
 			}
 
+			// In staging mode, leave files alone until they've stopped changing
+			// (still being downloaded/copied in).
+			if s.IncomingDir != "" {
+				if info, ierr := d.Info(); ierr == nil && time.Since(info.ModTime()) < incomingSettleTime {
+					return nil
+				}
+			}
+
 			dir := filepath.Dir(path)
 			cache, ok := dirCacheMap[dir]
 			if !ok {
@@ -244,6 +260,9 @@ func (s *VideoTranscoderServerPlugin) GenerateTasks(ctx context.Context) ([]plug
 				"preset":        s.Preset,
 				"audio_bitrate": s.AudioBitrate,
 				"container":     s.Container,
+			}
+			if s.IncomingDir != "" {
+				params["incoming_dir"] = s.IncomingDir
 			}
 			paramsJSON, _ := json.Marshal(params)
 
@@ -275,6 +294,7 @@ type TranscodeParams struct {
 	ScratchDir    string `json:"scratch_dir"`
 	FFmpegBinary  string `json:"ffmpeg_binary"`
 	FFprobeBinary string `json:"ffprobe_binary"`
+	IncomingDir   string `json:"incoming_dir"`
 }
 
 // VideoTranscoderWorkerPlugin executes video transcoding jobs with optional local SSD scratch buffering.
@@ -394,13 +414,21 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 		return fmt.Errorf("target file is empty")
 	}
 
-	if _, err := os.Stat(remoteInputFile); err != nil {
-		return fmt.Errorf("input video file not found: %s: %w", remoteInputFile, err)
+	srcDir := filepath.Dir(remoteInputFile)
+	base := strings.TrimSuffix(filepath.Base(remoteInputFile), filepath.Ext(remoteInputFile))
+	// dir is where the finished file lands: srcDir itself, or the library
+	// equivalent of srcDir when the source sits in the incoming staging area.
+	dir, staged := libraryDir(srcDir, params.IncomingDir)
+	finalCleanRemoteFile := filepath.Join(dir, fmt.Sprintf("%s.mp4", base))
+	if staged {
+		if err := os.MkdirAll(dir, 0775); err != nil {
+			return fmt.Errorf("failed to create library directory %s: %w", dir, err)
+		}
 	}
 
-	dir := filepath.Dir(remoteInputFile)
-	base := strings.TrimSuffix(filepath.Base(remoteInputFile), filepath.Ext(remoteInputFile))
-	finalCleanRemoteFile := filepath.Join(dir, fmt.Sprintf("%s.mp4", base))
+	if err := checkInputFile(remoteInputFile, finalCleanRemoteFile); err != nil {
+		return err
+	}
 
 	var encodeInputPath string
 	var encodeOutputPath string
@@ -424,7 +452,7 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 	} else {
 		// Direct in-place encoding
 		encodeInputPath = remoteInputFile
-		encodeOutputPath = filepath.Join(dir, fmt.Sprintf(".temp.%s.mp4", base))
+		encodeOutputPath = filepath.Join(srcDir, fmt.Sprintf(".temp.%s.mp4", base))
 	}
 
 	// 2. Probe input duration
@@ -439,6 +467,7 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 	// 3. Build FFmpeg command for 1080p Universal Direct Play
 	args := []string{
 		"-nostdin",
+		"-nostats", // progress comes from -progress; the \r-redrawn stats line is noise
 		"-y",
 		"-i", encodeInputPath,
 	}
@@ -500,18 +529,21 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 	// Read stderr for general logs
 	go func() {
 		defer wg.Done()
-		scanner := bufio.NewScanner(stderrPipe)
+		scanner := newLineScanner(stderrPipe)
 		for scanner.Scan() {
 			_ = reporter.Report(ctx, plugin.ProgressReport{
 				LogChunk: scanner.Text() + "\n",
 			})
 		}
+		// Never stop draining: an unread pipe blocks ffmpeg forever.
+		_, _ = io.Copy(io.Discard, stderrPipe)
 	}()
 
 	// Parse progress from stdout (-progress pipe:1)
 	go func() {
 		defer wg.Done()
-		scanner := bufio.NewScanner(stdoutPipe)
+		scanner := newLineScanner(stdoutPipe)
+		defer io.Copy(io.Discard, stdoutPipe) // keep draining if Scan stops early
 		var currentSpeed string
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -589,6 +621,11 @@ func (w *VideoTranscoderWorkerPlugin) Execute(ctx context.Context, payload plugi
 		_ = os.Remove(remoteInputFile)
 	}
 
+	if staged {
+		moveSidecars(srcDir, dir, base)
+		pruneEmptyDirs(srcDir, params.IncomingDir)
+	}
+
 	// Append to directory's local .transcode_cache
 	finalFileName := filepath.Base(finalCleanRemoteFile)
 	if err := appendTranscodeCache(dir, finalFileName); err != nil {
@@ -623,4 +660,118 @@ func getDuration(ctx context.Context, ffprobeBin, filePath string) float64 {
 		return 0
 	}
 	return sec
+}
+
+// checkInputFile decides what to do when a task's source file may be gone.
+//   - source exists: nil (proceed)
+//   - source gone, but the transcoded output exists next to it: skip (already done)
+//   - source gone, parent dir present: permanent failure (file was removed/renamed)
+//   - parent dir also gone: retryable error (share may be unmounted / offline)
+func checkInputFile(input, output string) error {
+	_, err := os.Stat(input)
+	if err == nil {
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("cannot access input video file: %s: %w", input, err)
+	}
+	if input != output {
+		if _, oerr := os.Stat(output); oerr == nil {
+			return plugin.Skip("source already transcoded: %s", output)
+		}
+	}
+	if _, derr := os.Stat(filepath.Dir(input)); derr == nil {
+		return plugin.Permanent(fmt.Errorf("input video file not found (directory exists, file removed): %s", input))
+	}
+	return fmt.Errorf("input video file not found: %s: %w", input, err)
+}
+
+// libraryDir maps a directory inside the incoming staging area to its library
+// equivalent by dropping the last path segment equal to incoming.
+// e.g. /m/_incoming/Movies/X -> /m/Movies/X. Returns (dir, false) if not staged.
+func libraryDir(dir, incoming string) (string, bool) {
+	if incoming == "" {
+		return dir, false
+	}
+	parts := strings.Split(filepath.Clean(dir), string(filepath.Separator))
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] == incoming {
+			out := append(append([]string{}, parts[:i]...), parts[i+1:]...)
+			joined := strings.Join(out, string(filepath.Separator))
+			if joined == "" {
+				joined = string(filepath.Separator)
+			}
+			return joined, true
+		}
+	}
+	return dir, false
+}
+
+// moveSidecars moves files named "<base>.*" (subtitles, .nfo, artwork) from
+// src to dst alongside the transcoded video. Failures are non-fatal.
+func moveSidecars(src, dst, base string) {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, base+".") {
+			continue
+		}
+		from, to := filepath.Join(src, name), filepath.Join(dst, name)
+		if err := os.Rename(from, to); err != nil {
+			// Cross-device fallback.
+			if data, rerr := os.ReadFile(from); rerr == nil && os.WriteFile(to, data, 0664) == nil {
+				_ = os.Remove(from)
+			}
+		}
+	}
+}
+
+// pruneEmptyDirs removes dir and its empty parents, stopping at (and keeping)
+// the incoming staging root.
+func pruneEmptyDirs(dir, incoming string) {
+	for {
+		if filepath.Base(dir) == incoming || dir == filepath.Dir(dir) {
+			return
+		}
+		if err := os.Remove(dir); err != nil { // fails if not empty
+			return
+		}
+		dir = filepath.Dir(dir)
+	}
+}
+
+// newLineScanner returns a Scanner that treats \r, \n and \r\n as line ends
+// (ffmpeg redraws status lines with \r) and tolerates long lines.
+func newLineScanner(r io.Reader) *bufio.Scanner {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	sc.Split(scanCRLF)
+	return sc
+}
+
+func scanCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	for i, b := range data {
+		if b == '\n' {
+			return i + 1, data[:i], nil
+		}
+		if b == '\r' {
+			if i+1 < len(data) && data[i+1] == '\n' {
+				return i + 2, data[:i], nil
+			}
+			if i+1 == len(data) && !atEOF {
+				return 0, nil, nil // need more data to tell \r from \r\n
+			}
+			return i + 1, data[:i], nil
+		}
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
