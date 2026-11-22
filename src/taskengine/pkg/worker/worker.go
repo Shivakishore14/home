@@ -62,7 +62,8 @@ func NewWorker(cfg Config, registry *plugin.Registry) *Worker {
 
 	enabledPlugins := cfg.EnabledPlugins
 	if len(enabledPlugins) == 0 {
-		enabledPlugins = registry.EnabledWorkerPlugins()
+		// Opt-in plugins (e.g. comfyui) only run when explicitly enabled.
+		enabledPlugins = registry.DefaultWorkerPlugins()
 	}
 
 	if cfg.Token == "" {
@@ -102,7 +103,7 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.semaphore = make(chan struct{}, concurrency)
 
 	log.Printf("[Worker %s] Successfully registered at %s. Concurrency: %d. Enabled plugins: %v",
-		w.cfg.WorkerID, w.cfg.ServerURL, concurrency, w.registry.EnabledWorkerPlugins())
+		w.cfg.WorkerID, w.cfg.ServerURL, concurrency, w.enabledPlugins)
 
 	// Start Heartbeat loop
 	hbInterval := w.effectiveConfig.HeartbeatInterval

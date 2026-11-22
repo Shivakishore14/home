@@ -357,3 +357,14 @@ func TestSeedValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestComfyUIIsOptIn(t *testing.T) {
+	for _, name := range plugin.DefaultRegistry.DefaultWorkerPlugins() {
+		if name == pluginName {
+			t.Fatal("comfyui must not be enabled on workers by default")
+		}
+	}
+	if _, ok := plugin.DefaultRegistry.GetWorkerPlugin(pluginName); !ok {
+		t.Fatal("comfyui must remain available when enabled explicitly")
+	}
+}

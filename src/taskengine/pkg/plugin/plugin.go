@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -112,6 +113,29 @@ func (r *Registry) GetWorkerPlugin(name string) (WorkerPlugin, bool) {
 	defer r.mu.RUnlock()
 	p, ok := r.workerPlugins[name]
 	return p, ok
+}
+
+// OptIn is implemented by worker plugins that must never run unless a worker
+// explicitly enables them (via --plugins or enabled_plugins in its config),
+// e.g. plugins that need special local software or hardware.
+type OptIn interface {
+	OptInOnly() bool
+}
+
+// DefaultWorkerPlugins returns registered worker plugins a worker enables when
+// none are configured explicitly: every plugin except opt-in ones.
+func (r *Registry) DefaultWorkerPlugins() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.workerPlugins))
+	for name, p := range r.workerPlugins {
+		if o, ok := p.(OptIn); ok && o.OptInOnly() {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // EnabledWorkerPlugins returns the list of registered worker plugin names.

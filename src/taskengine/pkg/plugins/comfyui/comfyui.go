@@ -68,6 +68,10 @@ func New() *Plugin {
 
 func (p *Plugin) Name() string { return pluginName }
 
+// OptInOnly keeps comfyui off workers that don't list it explicitly: it needs
+// a local ComfyUI server, and claiming its tasks elsewhere would burn retries.
+func (p *Plugin) OptInOnly() bool { return true }
+
 func (p *Plugin) Init(_ context.Context, raw json.RawMessage) error {
 	cfg := Config{}
 	if len(raw) > 0 && string(raw) != "null" {
