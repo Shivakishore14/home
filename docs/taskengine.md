@@ -382,7 +382,7 @@ make comfyui-install COMFYUI_DIR=/path/to/ComfyUI   # Linux: comfyui.service (ro
 make worker-uninstall | producer-uninstall | comfyui-uninstall
 ```
 
-* **Producer:** the server can't see the media drive, so the machine that has it (Mac mini) runs `taskengine producer`, which scans the `tasks/definitions` scanners (e.g. `_incoming`) every 60s (`PRODUCER_INTERVAL`) and submits tasks. Creating tasks needs a **client** token: add a dedicated one to the server's `TASKENGINE_CLIENT_TOKENS` and store it as `TASKENGINE_PRODUCER_TOKEN`.
+* **Producer:** the server can't see the media drive, so the machine that has it (Mac mini) runs `taskengine producer`, which scans the `tasks/definitions` scanners (e.g. `_incoming`) every 60s (`PRODUCER_INTERVAL`) and submits tasks. Creating tasks needs a **client** token, stored as `TASKENGINE_PRODUCER_TOKEN`: the API key (`TASKENGINE_API_KEY`) works, or add a separate one to `TASKENGINE_CLIENT_TOKENS` if you want to revoke it independently.
 * **ComfyUI:** listens on `127.0.0.1:8188` (`COMFYUI_LISTEN` / `COMFYUI_PORT` to change); waits for its drive to be mounted and restarts on failure. If ComfyUI is already running by hand, the unit is enabled for next boot but not started. The `comfyui` plugin waits up to `startup_wait_seconds` (default 180) for ComfyUI before failing a task.
 
 * First run prompts for the server URL and tokens and stores them in `~/.config/taskengine/worker.env` (mode 600, read literally, never sourced), so none of them land in the repo. Tokens are checked against the server before anything is changed.

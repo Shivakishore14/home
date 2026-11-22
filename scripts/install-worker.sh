@@ -17,7 +17,7 @@
 # prompted for on first use and never written to the repo:
 #   TASKENGINE_URL=https://...
 #   TASKENGINE_TOKEN=...            worker token (workers)
-#   TASKENGINE_PRODUCER_TOKEN=...   client token (producer creates tasks)
+#   TASKENGINE_PRODUCER_TOKEN=...   API key / client token (producer creates tasks)
 set -euo pipefail
 
 ACTION="${1:-}"
@@ -247,7 +247,7 @@ install_worker() {
 
 install_producer() {
   load_url
-  local token; token="$(require_env TASKENGINE_PRODUCER_TOKEN "Producer (client) token" secret)"
+  local token; token="$(require_env TASKENGINE_PRODUCER_TOKEN "Producer token (your API key or another client token)" secret)"
   verify_client_token "$token"
   build
   local args=(producer --server-url "$TASKENGINE_URL" --tasks-dir tasks --interval "$PRODUCER_INTERVAL")
