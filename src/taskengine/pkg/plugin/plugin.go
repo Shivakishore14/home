@@ -149,3 +149,23 @@ func (f *FuncProgressReporter) Report(ctx context.Context, report ProgressReport
 	}
 	return f.Func(ctx, report)
 }
+
+// TaskIO gives plugins access to server-side task I/O. The ProgressReporter
+// passed to Execute implements it when running under a TaskEngine worker;
+// use IOFrom to obtain it.
+type TaskIO interface {
+	// UploadOutput uploads a local file as a task output to object storage
+	// and returns its file ID. The file is attached to the task on completion.
+	UploadOutput(ctx context.Context, localPath, filename, mime string, meta map[string]string) (string, error)
+	// SetOutput records result details returned to clients with the task.
+	SetOutput(details map[string]interface{})
+	// FetchAsset downloads a file from the server's tasks/ directory
+	// (e.g. "tasks/assets/comfyui/x.json").
+	FetchAsset(ctx context.Context, relPath string) ([]byte, error)
+}
+
+// IOFrom returns the TaskIO behind a reporter, if available.
+func IOFrom(r ProgressReporter) (TaskIO, bool) {
+	tio, ok := r.(TaskIO)
+	return tio, ok
+}

@@ -17,6 +17,7 @@ import (
 	"taskengine/pkg/config"
 	"taskengine/pkg/db"
 	"taskengine/pkg/plugin"
+	_ "taskengine/pkg/plugins/comfyui"
 	_ "taskengine/pkg/plugins/runner"
 	_ "taskengine/pkg/plugins/transcoder"
 	"taskengine/pkg/producer"

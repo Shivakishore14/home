@@ -1,0 +1,16 @@
+# Second worker process on root-pc dedicated to ComfyUI, connected to the
+# public VPS TaskEngine (the "rootpc" worker keeps serving the Mac mini).
+# One task at a time: ComfyUI serializes GPU work anyway.
+#
+#   TASKENGINE_TOKEN=<worker token> taskengine worker \
+#     --server-url "$TASKENGINE_URL" --worker-id rootpc-comfy
+worker_id: "rootpc-comfy"
+max_concurrent_tasks: 1
+enabled_plugins:
+  - "comfyui"
+scratch_dir: "~/.cache/taskengine/scratch"
+plugin_configs:
+  comfyui:
+    url: "http://127.0.0.1:8188"
+    timeout_minutes: 60
+    thumbnail_size: 384

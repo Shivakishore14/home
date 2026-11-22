@@ -1,0 +1,28 @@
+# Client-facing parameters for jeveration_t2i.json (API-format workflow).
+# Only parameters listed here can be set by a task; everything else in the
+# graph is fixed. Submit with:
+#   {"plugin_name":"comfyui","params":{"workflow":"jeveration_t2i","inputs":{"prompt":"..."}}}
+title: "Jeveration text-to-image"
+description: "Fast int8 text-to-image (4 images per prompt by default)."
+workflow: jeveration_t2i.json
+params:
+  prompt:
+    node: "2"
+    input: text
+    type: text
+    label: Prompt
+    required: true
+    max_length: 2000
+  seed:
+    node: "3"
+    input: seed
+    type: seed
+    label: Seed (random if empty)
+  batch_size:
+    node: "3"
+    input: batch_size
+    type: int
+    label: Images
+    default: 4
+    min: 1
+    max: 4

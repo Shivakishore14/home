@@ -107,6 +107,7 @@ help:
 	@echo "   make taskengine-test    - Run all TaskEngine unit & integration tests"
 	@echo "   make taskengine-server  - Run TaskEngine in server mode (PORT=8080)"
 	@echo "   make taskengine-worker  - Run TaskEngine in worker mode (SERVER_URL=... WORKER_ID=...)"
+	@echo "   make taskengine-comfy-worker - Run the ComfyUI worker (TASKENGINE_URL=... TASKENGINE_TOKEN=...)"
 	@echo "   make taskengine-reload  - Trigger hot configuration reload from tasks/"
 	@echo "   make taskengine-status  - View TaskEngine stats and active workers"
 	@echo "   make taskengine-e2e     - Run automated end-to-end integration test"
@@ -196,6 +197,12 @@ taskengine-worker: taskengine-build
 	if [ "$(CONCURRENCY)" -gt 0 ]; then ARGS="$$ARGS --concurrency $(CONCURRENCY)"; fi; \
 	if [ -n "$(PLUGINS)" ]; then ARGS="$$ARGS --plugins $(PLUGINS)"; fi; \
 	./src/taskengine/bin/taskengine worker $$ARGS
+
+.PHONY: taskengine-comfy-worker
+taskengine-comfy-worker: taskengine-build
+	@if [ -z "$(TASKENGINE_URL)" ]; then echo "ERROR: set TASKENGINE_URL (e.g. make taskengine-comfy-worker TASKENGINE_URL=https://...)"; exit 1; fi
+	@if [ -z "$$TASKENGINE_TOKEN" ]; then echo "ERROR: set TASKENGINE_TOKEN to a worker token"; exit 1; fi
+	./src/taskengine/bin/taskengine worker --server-url $(TASKENGINE_URL) --worker-id rootpc-comfy
 
 .PHONY: taskengine-producer
 taskengine-producer: taskengine-build

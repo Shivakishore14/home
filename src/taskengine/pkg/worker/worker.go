@@ -35,6 +35,7 @@ type Config struct {
 type Worker struct {
 	cfg             Config
 	client          *http.Client
+	transferClient  *http.Client // no overall timeout; for file uploads/downloads
 	registry        *plugin.Registry
 	enabledPlugins  []string
 	effectiveConfig models.RegisterWorkerResponse
@@ -71,6 +72,7 @@ func NewWorker(cfg Config, registry *plugin.Registry) *Worker {
 	return &Worker{
 		cfg:            cfg,
 		client:         &http.Client{Timeout: 30 * time.Second, Transport: apiclient.Transport(cfg.ServerURL, cfg.Token, nil)},
+		transferClient: &http.Client{Transport: apiclient.Transport(cfg.ServerURL, cfg.Token, nil)},
 		registry:       registry,
 		enabledPlugins: enabledPlugins,
 		stopChan:       make(chan struct{}),
@@ -336,10 +338,11 @@ func (w *Worker) runTask(ctx context.Context, task *models.Task) {
 	}
 
 	reporter := &httpProgressReporter{
-		serverURL: w.cfg.ServerURL,
-		workerID:  w.cfg.WorkerID,
-		taskID:    task.ID,
-		client:    w.client,
+		serverURL:      w.cfg.ServerURL,
+		workerID:       w.cfg.WorkerID,
+		taskID:         task.ID,
+		client:         w.client,
+		transferClient: w.transferClient,
 	}
 
 	// Export runtime variables for plugins and scripts
@@ -365,7 +368,7 @@ func (w *Worker) runTask(ctx context.Context, task *models.Task) {
 	switch {
 	case errors.As(err, &skipErr):
 		log.Printf("[Worker %s] Task %s skipped: %s", w.cfg.WorkerID, task.ID, skipErr.Reason)
-		w.completeTask(ctx, task.ID, "Skipped: "+skipErr.Reason)
+		w.completeTask(ctx, task.ID, "Skipped: "+skipErr.Reason, reporter)
 	case errors.As(err, &permErr):
 		log.Printf("[Worker %s] Task %s failed permanently (no retry): %v", w.cfg.WorkerID, task.ID, err)
 		w.failTask(ctx, task.ID, err.Error(), false)
@@ -374,13 +377,16 @@ func (w *Worker) runTask(ctx context.Context, task *models.Task) {
 		w.failTask(ctx, task.ID, err.Error(), true)
 	default:
 		log.Printf("[Worker %s] Task %s completed successfully", w.cfg.WorkerID, task.ID)
-		w.completeTask(ctx, task.ID, "Task completed successfully")
+		w.completeTask(ctx, task.ID, "Task completed successfully", reporter)
 	}
 }
 
-func (w *Worker) completeTask(ctx context.Context, taskID, message string) {
+func (w *Worker) completeTask(ctx context.Context, taskID, message string, rep *httpProgressReporter) {
 	url := fmt.Sprintf("%s/api/v1/tasks/%s/complete", w.cfg.ServerURL, taskID)
 	reqBody := models.CompleteTaskRequest{Message: message}
+	if rep != nil {
+		reqBody.Files, reqBody.OutputDetails = rep.results()
+	}
 	data, _ := json.Marshal(reqBody)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
@@ -410,13 +416,18 @@ func (w *Worker) failTask(ctx context.Context, taskID, errMsg string, canRetry b
 
 // httpProgressReporter streams progress and logs over HTTP to server and prints terminal progress.
 type httpProgressReporter struct {
-	serverURL string
-	workerID  string
-	taskID    string
-	client    *http.Client
-	mu        sync.Mutex
-	lastProg  time.Time
-	lastLog   time.Time
+	serverURL      string
+	workerID       string
+	taskID         string
+	client         *http.Client
+	transferClient *http.Client
+	mu             sync.Mutex
+	lastProg       time.Time
+	lastLog        time.Time
+
+	ioMu    sync.Mutex
+	fileIDs []string
+	output  map[string]interface{}
 }
 
 func (r *httpProgressReporter) Report(ctx context.Context, report plugin.ProgressReport) error {

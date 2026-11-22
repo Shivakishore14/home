@@ -15,6 +15,9 @@
 6. [Operational Commands Reference](#-operational-commands-reference)
 7. [Embedded Web Dashboard](#-embedded-web-dashboard)
 8. [Cross-Platform Compilation & Releases](#-cross-platform-compilation--releases)
+9. [Authentication](#-authentication)
+10. [Object Storage (Cloudflare R2)](#-object-storage-cloudflare-r2)
+11. [ComfyUI Plugin (`comfyui`)](#-comfyui-plugin-comfyui)
 
 ---
 
@@ -260,6 +263,109 @@ Outputs in `src/taskengine/bin/`:
 * `taskengine_darwin_amd64` — macOS Intel
 * `taskengine_linux_arm64` — Linux ARM64 (Raspberry Pi 4/5, AWS Graviton)
 * `taskengine_linux_amd64` — Linux x86_64 (Servers, VMs, Synology/TrueNAS)
+
+---
+
+## 🔐 Authentication
+
+Auth is enabled as soon as any token is set on the server; with no tokens the API is open (LAN-only Mac mini setup).
+
+| Env var (server) | Access |
+|---|---|
+| `TASKENGINE_API_KEY`, `TASKENGINE_CLIENT_TOKENS` (comma-separated) | Everything (dashboard, create/cancel tasks, uploads, downloads) |
+| `TASKENGINE_WORKER_TOKENS` (comma-separated) | Worker endpoints only (register, heartbeat, claim, progress, logs, complete, fail, outputs, assets) |
+| `TASKENGINE_REQUIRE_AUTH=true` / `--require-auth` | Refuse to start without tokens (set in `docker-compose.vps.yml`) |
+
+* API clients send `Authorization: Bearer <token>`.
+* Workers, the producer and CLI commands read `TASKENGINE_TOKEN` (workers also accept `--token`). The token is only attached to requests for the server's own host, never to presigned storage URLs or ComfyUI.
+* The dashboard redirects to `/login`, which sets an HttpOnly cookie (90 days). `GET /healthz` is public.
+* `/api/v1/files/...` only serves files inside `tasks/`.
+
+---
+
+## 🪣 Object Storage (Cloudflare R2)
+
+Task inputs and outputs live in the R2 bucket `taskengine`; **file bytes never pass through the server**, which only signs short-lived URLs.
+
+```
+taskengine/
+  <plugin>/in/<date>/<file id>/<name>          client uploads
+  <plugin>/out/<task id>/<id prefix>-<name>    task outputs
+  tmp/                                          scratch (1-day lifecycle)
+```
+
+* **Credentials** (server env only): `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` (default `taskengine`). Without them storage endpoints return 503.
+* **Policy** per plugin in `tasks/config.yaml` → `storage.namespaces.<plugin>` (`retention_days`, `max_upload_mb`, `max_output_mb`, `allowed_mime`). A plugin without an entry cannot use storage. `retention_days` must match the bucket lifecycle rule for `<plugin>/` (`wrangler r2 bucket lifecycle add taskengine comfyui-expire comfyui/ --expire-days 10`).
+* Presigned PUTs sign `Content-Type` and `Content-Length`, so R2 rejects anything other than the declared file.
+
+### Flow
+
+```bash
+TOKEN=...; B=$TASKENGINE_URL   # your public TaskEngine URL
+# 1. Ask for an upload URL (input files)
+curl -s -H "Authorization: Bearer $TOKEN" -X POST $B/api/v1/uploads \
+  -d '{"plugin":"comfyui","filename":"fox.png","mime":"image/png","size":123456}'
+# -> {"file_id":"…","method":"PUT","url":"https://…r2.cloudflarestorage.com/…","headers":{"Content-Type":"image/png"},…}
+# 2. PUT the bytes to that URL with exactly those headers
+curl -X PUT -H "Content-Type: image/png" --data-binary @fox.png "<url>"
+# 3. Reference it in task params as {"upload": "<file_id>"}
+curl -s -H "Authorization: Bearer $TOKEN" -X POST $B/api/v1/tasks \
+  -d '{"plugin_name":"comfyui","params":{"workflow":"…","inputs":{"image":{"upload":"<file_id>"}}}}'
+# 4. Poll the task; completed tasks list output files with presigned URLs (1h)
+curl -s -H "Authorization: Bearer $TOKEN" $B/api/v1/tasks/<task id>   # .output, .files[].url
+# or redirect to a fresh URL any time: GET /api/v1/blobs/<file id>[?download=1]
+```
+
+* Task creation fails with 400 if an upload is missing, a different size than declared, expired, or belongs to another plugin.
+* When a worker claims the task, the server adds `url`, `filename`, `mime`, `size` to each `{"upload": …}` ref (6h URLs, never stored in the DB). If an input expired while queued the task fails permanently.
+* Workers upload outputs via `POST /api/v1/tasks/{id}/outputs` (plugins use `plugin.IOFrom(reporter).UploadOutput(...)`); completion marks them READY and stores the plugin's `output` details on the task.
+* A sweep marks files `EXPIRED` after retention; R2 lifecycle deletes the objects.
+
+---
+
+## 🎨 ComfyUI Plugin (`comfyui`)
+
+Runs ComfyUI workflows from templates in `tasks/assets/comfyui/`:
+
+* `<name>.json`: workflow in **API format** (ComfyUI → Workflow → Export (API)). UI-format files are rejected.
+* `<name>.yaml`: manifest declaring the parameters a task may set; everything else is fixed.
+
+```yaml
+title: "Jeveration text-to-image"
+workflow: jeveration_t2i.json
+params:
+  prompt:     {node: "2", input: text, type: text, required: true, max_length: 2000}
+  seed:       {node: "3", input: seed, type: seed}            # random when omitted
+  batch_size: {node: "3", input: batch_size, type: int, default: 4, min: 1, max: 4}
+  # image:    {node: "12", input: image, type: image}        # value: {"upload": "<file id>"}
+```
+
+Types: `text`, `int`, `number`, `bool`, `seed` (0..2^64-1), `choice` (`options: [...]`), `image` (any uploaded file staged into ComfyUI's `input/taskengine/<task id>/`).
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" -X POST $B/api/v1/tasks \
+  -d '{"plugin_name":"comfyui","params":{"workflow":"jeveration_t2i","inputs":{"prompt":"a red fox in snow"}}}'
+```
+
+**Execution:** download inputs → `POST /upload/image` → listen on `/ws` → `POST /prompt` → progress from websocket events (completion confirmed via `/history`) → download each `type: output` file via `/view` → upload to R2 (+ 384px JPEG thumbnail for images). Task `output`:
+
+```json
+{"workflow":"jeveration_t2i","prompt_id":"…","params":{"prompt":"…","seed":1773552633208855,"batch_size":1},
+ "outputs":[{"file_id":"…","thumbnail_id":"…","filename":"jeveration_00013_.png","node":"5","kind":"images","mime":"image/png"}]}
+```
+
+**Errors:** invalid params, ComfyUI validation errors and node execution errors fail permanently (no GPU-burning retries); ComfyUI being unreachable is retried. Cancelling/timeout (`timeout_minutes`, default 60) deletes the prompt from ComfyUI's queue and interrupts it.
+
+### Running the worker (root-pc)
+
+A dedicated worker process (`tasks/workers/rootpc-comfy.yaml`, concurrency 1) connects to the public VPS server, alongside the existing `rootpc` worker that serves the Mac mini:
+
+```bash
+TASKENGINE_URL=https://<your-taskengine-host> TASKENGINE_TOKEN=<worker token> make taskengine-comfy-worker
+# = taskengine worker --server-url $TASKENGINE_URL --worker-id rootpc-comfy
+```
+
+Plugin config (`plugin_configs.comfyui`): `url` (default `http://127.0.0.1:8188`), `assets_path`, `timeout_minutes`, `thumbnail_size` (`-1` disables).
 
 ---
 
