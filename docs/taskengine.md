@@ -393,6 +393,23 @@ make worker-uninstall | producer-uninstall | comfyui-uninstall
 
 ---
 
+## 🔑 Secrets in Bitwarden
+
+Bitwarden (folder **Homelab**) is the source of truth for homelab secrets; the scripts read them with the `bw` CLI (`pacman -S bitwarden-cli` / `brew install bitwarden-cli`, then `bw login` once per machine).
+
+| Item | Fields |
+|---|---|
+| `TaskEngine` (login) | URI = server URL, password = API key, hidden `worker_token` |
+| `Cloudflare R2` (note) | hidden `account_id`, `access_key_id`, `secret_access_key`, `bucket` |
+
+* `make bitwarden-import` copies whatever exists on the machine (`~/.config/taskengine/worker.env`, repo `.env.local`) into those items; changed values are shown masked and need confirmation.
+* `make worker-install` / `make producer-install` take missing values from Bitwarden (one master-password prompt, session kept in memory only) and cache them in `worker.env` for boot. After rotating a secret in Bitwarden: `BW_REFRESH=1 make worker-install WORKER_ID=...`.
+* `make r2-test` runs the R2 integration test with keys from Bitwarden (falls back to `.env.local`), so `.env.local` can be deleted once imported.
+* Coolify keeps its own copy of the server's env vars; update it from Bitwarden when rotating.
+* Secrets are passed to `bw` via stdin/env, never as command-line arguments.
+
+---
+
 ## 🔮 Future Extensions & Roadmap
 
 ### 1. 🌐 Dedicated Multi-Host Topology & Webhooks

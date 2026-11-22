@@ -111,6 +111,8 @@ help:
 	@echo "   make worker-uninstall   - Remove the worker boot service"
 	@echo "   make producer-install   - Install the task producer (scans media, submits transcode tasks)"
 	@echo "   make comfyui-install COMFYUI_DIR=<dir> - Run ComfyUI as a systemd user service (Linux)"
+	@echo "   make bitwarden-import   - Copy this machine's homelab secrets into Bitwarden (folder Homelab)"
+	@echo "   make r2-test            - Run the R2 integration test with keys from Bitwarden"
 	@echo "   make taskengine-reload  - Trigger hot configuration reload from tasks/"
 	@echo "   make taskengine-status  - View TaskEngine stats and active workers"
 	@echo "   make taskengine-e2e     - Run automated end-to-end integration test"
@@ -222,6 +224,14 @@ producer-uninstall:
 comfyui-install:
 	@if [ -z "$(COMFYUI_DIR)" ]; then echo "ERROR: set COMFYUI_DIR (path containing main.py and venv/)"; exit 1; fi
 	@bash scripts/install-worker.sh install-comfyui "$(COMFYUI_DIR)"
+
+.PHONY: bitwarden-import
+bitwarden-import:
+	@bash scripts/bitwarden-import.sh
+
+.PHONY: r2-test
+r2-test:
+	@bash scripts/r2-env.sh -- sh -c 'cd src/taskengine && R2_INTEGRATION=1 go test ./pkg/storage -run R2Integration -v'
 
 .PHONY: comfyui-uninstall
 comfyui-uninstall:
