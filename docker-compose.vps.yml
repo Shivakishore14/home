@@ -24,7 +24,9 @@ services:
       - "8080"
     volumes:
       - ./data:/app/data
-      - ./tasks:/app/tasks
+      # tasks/ (config, worker configs, workflow templates) is baked into the
+      # image and ships with each deploy; mounting it would hide it (on Coolify
+      # the host directory is empty).
     environment:
       - PORT=8080
       - TZ=${TZ:-UTC}

@@ -22,7 +22,9 @@ COPY tasks/ /app/tasks/
 
 EXPOSE 8080
 
-VOLUME ["/app/data", "/app/tasks"]
+# Only data/ is persistent; tasks/ comes from the image so config changes ship
+# with each deploy (a volume here would freeze it at the first deploy).
+VOLUME ["/app/data"]
 
 ENTRYPOINT ["/app/taskengine"]
 CMD ["server", "--port", "8080", "--tasks-dir", "/app/tasks", "--db-path", "/app/data/taskengine.db"]
