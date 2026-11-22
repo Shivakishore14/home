@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"taskengine/pkg/apiclient"
 	"taskengine/pkg/config"
 	"taskengine/pkg/db"
 	"taskengine/pkg/plugin"
@@ -79,6 +80,7 @@ func runServer(args []string) {
 	port := fs.Int("port", 0, "Server HTTP port (overrides tasks/config.yaml)")
 	tasksDir := fs.String("tasks-dir", "tasks", "Path to tasks configuration directory")
 	dbPath := fs.String("db-path", "", "Path to SQLite database file (overrides tasks/config.yaml)")
+	requireAuth := fs.Bool("require-auth", false, "Fail to start unless auth tokens are configured (also $TASKENGINE_REQUIRE_AUTH=true)")
 
 	_ = fs.Parse(args)
 
@@ -123,6 +125,13 @@ func runServer(args []string) {
 	defer database.Close()
 
 	srv := server.NewServer(cfgMgr, database, plugin.DefaultRegistry)
+	if srv.AuthEnabled() {
+		log.Println("[TaskEngine Server] Token auth enabled")
+	} else if *requireAuth || os.Getenv("TASKENGINE_REQUIRE_AUTH") == "true" {
+		log.Fatalf("Refusing to start: auth required but no tokens set (TASKENGINE_API_KEY / TASKENGINE_CLIENT_TOKENS / TASKENGINE_WORKER_TOKENS)")
+	} else {
+		log.Println("[TaskEngine Server] WARNING: no tokens configured; API is open (LAN-only mode)")
+	}
 
 	// Listen for shutdown signals
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -152,6 +161,7 @@ func runWorker(args []string) {
 	concurrency := fs.Int("concurrency", 0, "Max concurrent task executions (overrides server defaults)")
 	plugins := fs.String("plugins", "", "Comma-separated list of enabled plugins (e.g. video-transcoder,command-runner)")
 	pollInterval := fs.Duration("poll-interval", 2*time.Second, "Task polling interval")
+	token := fs.String("token", "", "Bearer token for the server (default $TASKENGINE_TOKEN)")
 
 	_ = fs.Parse(args)
 
@@ -181,6 +191,7 @@ func runWorker(args []string) {
 		Concurrency:    *concurrency,
 		EnabledPlugins: enabledPlugins,
 		PollInterval:   *pollInterval,
+		Token:          *token,
 	}, plugin.DefaultRegistry)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -201,7 +212,7 @@ func runReload(args []string) {
 	serverURL := fs.String("server-url", "http://localhost:8080", "Server base URL")
 	_ = fs.Parse(args)
 
-	resp, err := http.Post(fmt.Sprintf("%s/api/v1/config/reload", *serverURL), "application/json", nil)
+	resp, err := cliClient(*serverURL).Post(fmt.Sprintf("%s/api/v1/config/reload", *serverURL), "application/json", nil)
 	if err != nil {
 		log.Fatalf("Failed to connect to server: %v", err)
 	}
@@ -221,7 +232,7 @@ func runStatus(args []string) {
 	serverURL := fs.String("server-url", "http://localhost:8080", "Server base URL")
 	_ = fs.Parse(args)
 
-	resp, err := http.Get(fmt.Sprintf("%s/api/v1/stats", *serverURL))
+	resp, err := cliClient(*serverURL).Get(fmt.Sprintf("%s/api/v1/stats", *serverURL))
 	if err != nil {
 		log.Fatalf("Failed to connect to server: %v", err)
 	}
@@ -236,7 +247,7 @@ func runRetryFailed(args []string) {
 	serverURL := fs.String("server-url", "http://localhost:8080", "Server base URL")
 	_ = fs.Parse(args)
 
-	resp, err := http.Post(fmt.Sprintf("%s/api/v1/tasks/retry-failed", *serverURL), "application/json", nil)
+	resp, err := cliClient(*serverURL).Post(fmt.Sprintf("%s/api/v1/tasks/retry-failed", *serverURL), "application/json", nil)
 	if err != nil {
 		log.Fatalf("Failed to connect to server: %v", err)
 	}
@@ -284,4 +295,10 @@ func runProducer(args []string) {
 	if err := p.Run(ctx); err != nil {
 		log.Fatalf("Producer failed: %v", err)
 	}
+}
+
+// cliClient returns an HTTP client that authenticates to serverURL with
+// $TASKENGINE_TOKEN when set.
+func cliClient(serverURL string) *http.Client {
+	return &http.Client{Timeout: 30 * time.Second, Transport: apiclient.Transport(serverURL, apiclient.TokenFromEnv(), nil)}
 }

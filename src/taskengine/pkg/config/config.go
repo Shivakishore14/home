@@ -376,24 +376,32 @@ func (m *Manager) GetTaskAssets(taskName string) (*models.TaskAssets, error) {
 	return result, nil
 }
 
-// GetAssetFilePath safely resolves a relative asset path to an absolute path within repoRoot or tasksDir.
+// GetAssetFilePath safely resolves a relative asset path to an absolute path.
+// Only files inside the tasks directory are served (e.g. "tasks/assets/x.py"
+// relative to the repo root, or "assets/x.py" relative to tasks/), so the API
+// can never expose the database, binaries, or other files next to tasks/.
 func (m *Manager) GetAssetFilePath(relPath string) (string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	cleaned := filepath.Clean(relPath)
-	if strings.HasPrefix(cleaned, "..") {
+	if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "..") {
 		return "", fmt.Errorf("invalid path traversal")
 	}
 
-	p1 := filepath.Join(m.repoRoot, cleaned)
-	if _, err := os.Stat(p1); err == nil {
-		return p1, nil
+	absTasksDir, err := filepath.Abs(m.tasksDir)
+	if err != nil {
+		return "", err
 	}
 
-	p2 := filepath.Join(m.tasksDir, cleaned)
-	if _, err := os.Stat(p2); err == nil {
-		return p2, nil
+	for _, candidate := range []string{filepath.Join(m.repoRoot, cleaned), filepath.Join(absTasksDir, cleaned)} {
+		rel, err := filepath.Rel(absTasksDir, candidate)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+			return candidate, nil
+		}
 	}
 
 	return "", fmt.Errorf("file not found: %s", relPath)

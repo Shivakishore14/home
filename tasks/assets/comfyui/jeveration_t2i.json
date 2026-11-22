@@ -1,0 +1,25 @@
+{
+  "1": {
+    "class_type": "JeverationCheckpointLoader",
+    "inputs": {"ckpt_name": "jeveration_t2i_int8_convrot.safetensors"}
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "a cute anime girl with massive fennec ears, a big fluffy tail, long blonde wavy hair and blue eyes, smiling",
+      "clip": ["1", 1]
+    }
+  },
+  "3": {
+    "class_type": "JeverationSampler",
+    "inputs": {"model": ["1", 0], "positive": ["2", 0], "seed": 0, "batch_size": 4}
+  },
+  "4": {
+    "class_type": "JeverationDecode",
+    "inputs": {"decoder": ["1", 2], "samples": ["3", 0], "positive": ["2", 0]}
+  },
+  "5": {
+    "class_type": "SaveImage",
+    "inputs": {"images": ["4", 0], "filename_prefix": "jeveration"}
+  }
+}

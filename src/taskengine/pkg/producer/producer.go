@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"taskengine/pkg/apiclient"
 	"taskengine/pkg/config"
 	"taskengine/pkg/models"
 	"taskengine/pkg/plugin"
@@ -51,7 +52,7 @@ func New(cfg Config, registry *plugin.Registry) (*Producer, error) {
 		cfg:      cfg,
 		cfgMgr:   cfgMgr,
 		registry: registry,
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   &http.Client{Timeout: 30 * time.Second, Transport: apiclient.Transport(cfg.ServerURL, apiclient.TokenFromEnv(), nil)},
 	}, nil
 }
 

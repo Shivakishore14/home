@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"taskengine/pkg/apiclient"
 	"time"
 
 	"taskengine/pkg/models"
@@ -249,6 +250,7 @@ func (p *CommandRunnerPlugin) syncTaskAssets(ctx context.Context, serverURL, tas
 	if err != nil {
 		return err
 	}
+	setServerAuth(req)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -296,6 +298,7 @@ func (p *CommandRunnerPlugin) syncTaskAssets(ctx context.Context, serverURL, tas
 		if err != nil {
 			continue
 		}
+		setServerAuth(fileReq)
 
 		fileResp, err := p.httpClient.Do(fileReq)
 		if err != nil || fileResp.StatusCode != http.StatusOK {
@@ -342,4 +345,12 @@ func (p *CommandRunnerPlugin) runCheckCommand(ctx context.Context, shell, checkC
 	}
 
 	return nil
+}
+
+// setServerAuth attaches the worker's TaskEngine token (requests here only go
+// to SERVER_URL).
+func setServerAuth(req *http.Request) {
+	if tok := apiclient.TokenFromEnv(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 }

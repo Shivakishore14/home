@@ -34,6 +34,7 @@ type Server struct {
 	wg       sync.WaitGroup
 
 	jellyfin *jellyfinNotifier
+	auth     *Auth
 }
 
 // NewServer initializes a new Server instance.
@@ -50,6 +51,7 @@ func NewServer(cfg *config.Manager, database *db.DB, registry *plugin.Registry) 
 		sseClients:     make(map[chan models.SSEEvent]bool),
 		stopChan:       make(chan struct{}),
 		jellyfin:       newJellyfinNotifierFromEnv(),
+		auth:           AuthFromEnv(),
 	}
 
 	s.setupRoutes()
@@ -58,33 +60,39 @@ func NewServer(cfg *config.Manager, database *db.DB, registry *plugin.Registry) 
 
 // setupRoutes registers all HTTP API and Web UI endpoints.
 func (s *Server) setupRoutes() {
-	// API v1 Endpoints
-	s.mux.HandleFunc("POST /api/v1/config/reload", s.handleConfigReload)
-	s.mux.HandleFunc("GET /api/v1/config", s.handleGetConfig)
-	s.mux.HandleFunc("GET /api/v1/stats", s.handleGetStats)
+	// Public
+	s.route("GET /healthz", accessPublic, func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	s.route("GET /login", accessPublic, s.handleLoginPage)
+	s.route("POST /login", accessPublic, s.handleLogin)
+	s.route("POST /logout", accessPublic, s.handleLogout)
+
+	// API v1 Endpoints (client)
+	s.route("POST /api/v1/config/reload", accessClient, s.handleConfigReload)
+	s.route("GET /api/v1/config", accessClient, s.handleGetConfig)
+	s.route("GET /api/v1/stats", accessClient, s.handleGetStats)
 
 	// Worker endpoints
-	s.mux.HandleFunc("POST /api/v1/workers/register", s.handleRegisterWorker)
-	s.mux.HandleFunc("POST /api/v1/workers/{id}/heartbeat", s.handleWorkerHeartbeat)
-	s.mux.HandleFunc("GET /api/v1/workers", s.handleListWorkers)
+	s.route("POST /api/v1/workers/register", accessWorker, s.handleRegisterWorker)
+	s.route("POST /api/v1/workers/{id}/heartbeat", accessWorker, s.handleWorkerHeartbeat)
+	s.route("GET /api/v1/workers", accessClient, s.handleListWorkers)
 
 	// Task endpoints
-	s.mux.HandleFunc("POST /api/v1/tasks/claim", s.handleClaimTask)
-	s.mux.HandleFunc("POST /api/v1/tasks/retry-failed", s.handleRetryFailedTasks)
-	s.mux.HandleFunc("POST /api/v1/tasks/{id}/progress", s.handleTaskProgress)
-	s.mux.HandleFunc("POST /api/v1/tasks/{id}/logs", s.handleTaskLog)
-	s.mux.HandleFunc("POST /api/v1/tasks/{id}/complete", s.handleCompleteTask)
-	s.mux.HandleFunc("POST /api/v1/tasks/{id}/fail", s.handleFailTask)
-	s.mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", s.handleCancelTask)
-	s.mux.HandleFunc("POST /api/v1/tasks", s.handleCreateTask)
-	s.mux.HandleFunc("GET /api/v1/tasks", s.handleListTasks)
-	s.mux.HandleFunc("GET /api/v1/tasks/{id}", s.handleGetTask)
-	s.mux.HandleFunc("GET /api/v1/tasks/{name}/assets", s.handleGetTaskAssets)
-	s.mux.HandleFunc("GET /api/v1/files/{path...}", s.handleGetFile)
-	s.mux.HandleFunc("GET /api/v1/binaries/{name}", s.handleGetBinary)
+	s.route("POST /api/v1/tasks/claim", accessWorker, s.handleClaimTask)
+	s.route("POST /api/v1/tasks/retry-failed", accessClient, s.handleRetryFailedTasks)
+	s.route("POST /api/v1/tasks/{id}/progress", accessWorker, s.handleTaskProgress)
+	s.route("POST /api/v1/tasks/{id}/logs", accessWorker, s.handleTaskLog)
+	s.route("POST /api/v1/tasks/{id}/complete", accessWorker, s.handleCompleteTask)
+	s.route("POST /api/v1/tasks/{id}/fail", accessWorker, s.handleFailTask)
+	s.route("POST /api/v1/tasks/{id}/cancel", accessClient, s.handleCancelTask)
+	s.route("POST /api/v1/tasks", accessClient, s.handleCreateTask)
+	s.route("GET /api/v1/tasks", accessClient, s.handleListTasks)
+	s.route("GET /api/v1/tasks/{id}", accessClient, s.handleGetTask)
+	s.route("GET /api/v1/tasks/{name}/assets", accessWorker, s.handleGetTaskAssets)
+	s.route("GET /api/v1/files/{path...}", accessWorker, s.handleGetFile)
+	s.route("GET /api/v1/binaries/{name}", accessWorker, s.handleGetBinary)
 
 	// SSE Real-time stream
-	s.mux.HandleFunc("GET /api/v1/events", s.handleSSE)
+	s.route("GET /api/v1/events", accessClient, s.handleSSE)
 
 	// Embedded Static Assets
 	if staticFS, err := web.GetStaticFS(); err == nil {
@@ -98,6 +106,10 @@ func (s *Server) setupRoutes() {
 			http.NotFound(w, r)
 			return
 		}
+		if !s.auth.allowed(r, accessClient) {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Template error: %v", err), http.StatusInternalServerError)
 			return
@@ -106,6 +118,15 @@ func (s *Server) setupRoutes() {
 		_ = tmpl.Execute(w, nil)
 	})
 }
+
+// SetAuth replaces the server's auth configuration (checked per request).
+// Intended for tests and embedding.
+func (s *Server) SetAuth(a *Auth) {
+	s.auth = a
+}
+
+// AuthEnabled reports whether token auth is active.
+func (s *Server) AuthEnabled() bool { return s.auth.Enabled() }
 
 // Handler returns the HTTP handler (for testing or embedding).
 func (s *Server) Handler() http.Handler {
@@ -602,7 +623,6 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	clientChan := make(chan models.SSEEvent, 100)
 	s.sseMu.Lock()

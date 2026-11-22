@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"taskengine/pkg/apiclient"
 	"taskengine/pkg/models"
 	"taskengine/pkg/plugin"
 )
@@ -26,6 +27,8 @@ type Config struct {
 	PollInterval   time.Duration
 	Concurrency    int
 	EnabledPlugins []string
+	// Token is the bearer token sent to the server (defaults to $TASKENGINE_TOKEN).
+	Token string
 }
 
 // Worker handles task polling, execution, and heartbeats.
@@ -61,9 +64,13 @@ func NewWorker(cfg Config, registry *plugin.Registry) *Worker {
 		enabledPlugins = registry.EnabledWorkerPlugins()
 	}
 
+	if cfg.Token == "" {
+		cfg.Token = apiclient.TokenFromEnv()
+	}
+
 	return &Worker{
 		cfg:            cfg,
-		client:         &http.Client{Timeout: 30 * time.Second},
+		client:         &http.Client{Timeout: 30 * time.Second, Transport: apiclient.Transport(cfg.ServerURL, cfg.Token, nil)},
 		registry:       registry,
 		enabledPlugins: enabledPlugins,
 		stopChan:       make(chan struct{}),
@@ -141,6 +148,9 @@ func (w *Worker) register(ctx context.Context) error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("register rejected (401): set a valid worker token via --token or $%s", apiclient.TokenEnv)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("register returned status: %d", resp.StatusCode)
 	}
@@ -335,6 +345,9 @@ func (w *Worker) runTask(ctx context.Context, task *models.Task) {
 	// Export runtime variables for plugins and scripts
 	os.Setenv("SERVER_URL", w.cfg.ServerURL)
 	os.Setenv("WORKER_ID", w.cfg.WorkerID)
+	if w.cfg.Token != "" {
+		os.Setenv(apiclient.TokenEnv, w.cfg.Token)
+	}
 	if w.effectiveConfig.ScratchDir != "" {
 		os.Setenv("SCRATCH_DIR", w.effectiveConfig.ScratchDir)
 	}

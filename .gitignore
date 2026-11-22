@@ -30,3 +30,7 @@ src/taskengine/bin/
 *.db-wal
 *.db-shm
 data/
+
+# Local secrets (R2 credentials, tokens)
+.env.local
+.env.*.local

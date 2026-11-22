@@ -1,3 +1,11 @@
+// Redirect to the login page when the session token is missing/invalid.
+const _fetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const res = await _fetch(...args);
+  if (res.status === 401) window.location.href = "/login";
+  return res;
+};
+
 let currentFilter = "";
 let activeLogTaskID = null;
 
