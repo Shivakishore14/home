@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -34,9 +35,10 @@ type Server struct {
 	stopChan chan struct{}
 	wg       sync.WaitGroup
 
-	jellyfin *jellyfinNotifier
-	auth     *Auth
-	store    storage.Store
+	jellyfin  *jellyfinNotifier
+	auth      *Auth
+	store     storage.Store
+	callbacks *callbackSender
 }
 
 // NewServer initializes a new Server instance.
@@ -54,6 +56,7 @@ func NewServer(cfg *config.Manager, database *db.DB, registry *plugin.Registry) 
 		stopChan:       make(chan struct{}),
 		jellyfin:       newJellyfinNotifierFromEnv(),
 		auth:           AuthFromEnv(),
+		callbacks:      newCallbackSenderFromEnv(),
 	}
 
 	s.setupRoutes()
@@ -90,6 +93,7 @@ func (s *Server) setupRoutes() {
 	s.route("GET /api/v1/tasks", accessClient, s.handleListTasks)
 	s.route("GET /api/v1/tasks/{id}", accessClient, s.handleGetTask)
 	s.route("GET /api/v1/tasks/{name}/assets", accessWorker, s.handleGetTaskAssets)
+	s.route("POST /api/v1/callbacks/{id}/redeliver", accessClient, s.handleRedeliverCallback)
 	s.route("GET /api/v1/files/{path...}", accessWorker, s.handleGetFile)
 	s.route("GET /api/v1/binaries/{name}", accessWorker, s.handleGetBinary)
 
@@ -162,6 +166,7 @@ func (s *Server) Broadcast(eventType string, data interface{}) {
 func (s *Server) Start(addr string) error {
 	s.startBackgroundSweeper()
 	s.startTaskGenerators()
+	s.startCallbackDispatcher()
 
 	s.httpServer = &http.Server{
 		Addr:    addr,
@@ -429,6 +434,7 @@ func (s *Server) handleClaimTask(w http.ResponseWriter, r *http.Request) {
 		msg := fmt.Sprintf("Input files unavailable: %v", err)
 		_ = s.db.FailTask(r.Context(), task.ID, msg, false)
 		s.Broadcast("task_failed", map[string]interface{}{"id": task.ID, "error_message": msg, "can_retry": false})
+		s.kickCallbacks()
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -508,6 +514,7 @@ func (s *Server) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
 		"id":      taskID,
 		"message": msg,
 	})
+	s.kickCallbacks()
 
 	if t, err := s.db.GetTask(r.Context(), taskID); err == nil && t.PluginName == "video-transcoder" {
 		s.jellyfin.Schedule()
@@ -534,6 +541,7 @@ func (s *Server) handleFailTask(w http.ResponseWriter, r *http.Request) {
 		"error_message": req.ErrorMessage,
 		"can_retry":     req.CanRetry,
 	})
+	s.kickCallbacks()
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status": "ok"}`))
 }
@@ -545,6 +553,7 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Broadcast("task_cancelled", map[string]interface{}{"id": taskID})
+	s.kickCallbacks()
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status": "ok"}`))
 }
@@ -561,6 +570,14 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.validateUploadRefs(r.Context(), req.PluginName, req.Params); err != nil {
 		http.Error(w, err.Error(), storageErrStatus(err))
+		return
+	}
+	if err := s.validateCallback(req.Callback); err != nil {
+		code := http.StatusBadRequest
+		if errors.Is(err, errCallbacksDisabled) {
+			code = http.StatusServiceUnavailable
+		}
+		http.Error(w, err.Error(), code)
 		return
 	}
 
@@ -645,7 +662,12 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, models.TaskDetail{Task: *task, Files: files})
+	callbacks, err := s.db.ListTaskCallbacks(r.Context(), task.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, models.TaskDetail{Task: *task, Files: files, Callbacks: callbacks})
 }
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {

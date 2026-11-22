@@ -41,6 +41,61 @@ type Task struct {
 	UpdatedAt     time.Time       `json:"updated_at"`
 	// Output holds plugin-reported result details (set on completion).
 	Output json.RawMessage `json:"output,omitempty"`
+	// Callback is where the server reports the task's final state, if set.
+	Callback *TaskCallback `json:"callback,omitempty"`
+}
+
+// TaskCallback asks the server to POST the task's final state to URL once it
+// completes, fails for good, or is cancelled. Ref is echoed back unchanged so
+// the client can find its own record without storing the task ID.
+type TaskCallback struct {
+	URL string `json:"url"`
+	Ref string `json:"ref,omitempty"`
+}
+
+// Callback events, one per terminal task state.
+const (
+	EventTaskCompleted = "task.completed"
+	EventTaskFailed    = "task.failed"
+	EventTaskCancelled = "task.cancelled"
+)
+
+// Callback delivery statuses.
+const (
+	CallbackPending   = "PENDING"
+	CallbackDelivered = "DELIVERED"
+	CallbackFailed    = "FAILED" // gave up after the last retry
+)
+
+// CallbackDelivery is one queued webhook call (outbox row).
+type CallbackDelivery struct {
+	ID            string     `json:"id"`
+	TaskID        string     `json:"task_id"`
+	Event         string     `json:"event"`
+	URL           string     `json:"url"`
+	Ref           string     `json:"ref,omitempty"`
+	Status        string     `json:"status"`
+	Attempts      int        `json:"attempts"`
+	LastStatus    int        `json:"last_status,omitempty"` // HTTP status of the last attempt
+	LastError     string     `json:"last_error,omitempty"`
+	NextAttemptAt time.Time  `json:"next_attempt_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+	DeliveredAt   *time.Time `json:"delivered_at,omitempty"`
+}
+
+// CallbackPayload is the JSON body POSTed to a task's callback URL.
+type CallbackPayload struct {
+	DeliveryID string          `json:"delivery_id"`
+	Event      string          `json:"event"`
+	TaskID     string          `json:"task_id"`
+	Ref        string          `json:"ref,omitempty"`
+	PluginName string          `json:"plugin_name"`
+	Status     string          `json:"status"`
+	Message    string          `json:"message,omitempty"`
+	Output     json.RawMessage `json:"output,omitempty"`
+	// Files are the task's outputs; ready ones carry a presigned GET URL minted at send time.
+	Files      []File    `json:"files"`
+	OccurredAt time.Time `json:"occurred_at"`
 }
 
 // Worker represents a registered worker node.
@@ -129,6 +184,8 @@ type CreateTaskRequest struct {
 	Priority   int             `json:"priority,omitempty"`
 	MaxRetries int             `json:"max_retries,omitempty"`
 	Params     json.RawMessage `json:"params"`
+	// Callback, if set, is called once the task reaches a final state.
+	Callback *TaskCallback `json:"callback,omitempty"`
 }
 
 // SSEEvent represents a live event broadcasted to connected web clients.
@@ -194,5 +251,6 @@ type PresignResponse struct {
 // TaskDetail is a task plus its stored files (GET /api/v1/tasks/{id}).
 type TaskDetail struct {
 	Task
-	Files []File `json:"files"`
+	Files     []File             `json:"files"`
+	Callbacks []CallbackDelivery `json:"callbacks,omitempty"`
 }

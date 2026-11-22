@@ -53,11 +53,20 @@ type StorageConfig struct {
 	Namespaces map[string]StorageNamespace `yaml:"namespaces" json:"namespaces"`
 }
 
+// CallbacksConfig controls task completion webhooks. The signing secret comes
+// from the environment (TASKENGINE_CALLBACK_SECRET); this only holds policy.
+type CallbacksConfig struct {
+	// AllowedHosts lists the hosts (optionally host:port) a task's callback URL
+	// may point at. Empty means callbacks are refused.
+	AllowedHosts []string `yaml:"allowed_hosts" json:"allowed_hosts"`
+}
+
 // GlobalConfig represents the root config.yaml file.
 type GlobalConfig struct {
-	Server   ServerConfig   `yaml:"server"`
-	Defaults DefaultsConfig `yaml:"defaults"`
-	Storage  StorageConfig  `yaml:"storage"`
+	Server    ServerConfig    `yaml:"server"`
+	Defaults  DefaultsConfig  `yaml:"defaults"`
+	Storage   StorageConfig   `yaml:"storage"`
+	Callbacks CallbacksConfig `yaml:"callbacks"`
 }
 
 // WorkerConfig represents per-worker overrides in tasks/workers/*.yaml.

@@ -36,3 +36,11 @@ storage:
       max_upload_mb: 25
       max_output_mb: 512
       allowed_mime: ["image/png", "image/jpeg", "image/webp"]
+
+# Task callbacks: a task created with {"callback": {"url": "...", "ref": "..."}}
+# gets a signed POST when it completes, fails for good, or is cancelled. URLs
+# must be https and on this list. The signing secret is the server's
+# TASKENGINE_CALLBACK_SECRET env var; without it callbacks are refused.
+callbacks:
+  allowed_hosts:
+    - socialgrow.win
