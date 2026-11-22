@@ -38,7 +38,7 @@ func TestAuthRoles(t *testing.T) {
 
 	cases := []struct {
 		name, method, path, token, body string
-		want                             int
+		want                            int
 	}{
 		{"healthz public", "GET", "/healthz", "", "", 200},
 		{"login page public", "GET", "/login", "", "", 200},

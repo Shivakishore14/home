@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"taskengine/pkg/models"
 
@@ -31,10 +32,32 @@ type DefaultsConfig struct {
 	PluginConfigs      map[string]interface{} `yaml:"plugin_configs"`
 }
 
+// StorageNamespace holds per-plugin storage policy. Object keys live under
+// "<plugin>/in/..." (client uploads) and "<plugin>/out/<task_id>/..." (outputs).
+// RetentionDays should mirror the bucket's lifecycle rule for that prefix.
+type StorageNamespace struct {
+	RetentionDays int      `yaml:"retention_days" json:"retention_days"`
+	MaxUploadMB   int      `yaml:"max_upload_mb" json:"max_upload_mb"`
+	MaxOutputMB   int      `yaml:"max_output_mb" json:"max_output_mb"`
+	AllowedMIME   []string `yaml:"allowed_mime" json:"allowed_mime"`
+}
+
+// StorageConfig configures presigned object storage. Credentials come from
+// the environment (R2_*); this file only holds policy.
+type StorageConfig struct {
+	PresignPutTTL string `yaml:"presign_put_ttl" json:"presign_put_ttl"`
+	PresignGetTTL string `yaml:"presign_get_ttl" json:"presign_get_ttl"`
+	// WorkerGetTTL is the lifetime of input URLs handed to workers at claim time.
+	WorkerGetTTL string `yaml:"worker_get_ttl" json:"worker_get_ttl"`
+	// Plugins may only use storage when they have a namespace entry here.
+	Namespaces map[string]StorageNamespace `yaml:"namespaces" json:"namespaces"`
+}
+
 // GlobalConfig represents the root config.yaml file.
 type GlobalConfig struct {
 	Server   ServerConfig   `yaml:"server"`
 	Defaults DefaultsConfig `yaml:"defaults"`
+	Storage  StorageConfig  `yaml:"storage"`
 }
 
 // WorkerConfig represents per-worker overrides in tasks/workers/*.yaml.
@@ -415,4 +438,47 @@ func getGitCommitHash(dir string) string {
 		return strings.TrimSpace(string(out))
 	}
 	return ""
+}
+
+// Durations parses the storage TTLs, applying defaults
+// (upload 10m, client download 1h, worker download 6h).
+func (c StorageConfig) Durations() (put, get, worker time.Duration) {
+	parse := func(s string, def time.Duration) time.Duration {
+		if d, err := time.ParseDuration(s); err == nil && d > 0 {
+			return d
+		}
+		return def
+	}
+	return parse(c.PresignPutTTL, 10*time.Minute), parse(c.PresignGetTTL, time.Hour), parse(c.WorkerGetTTL, 6*time.Hour)
+}
+
+// Namespace returns the storage policy for plugin, with defaults applied.
+func (c StorageConfig) Namespace(plugin string) (StorageNamespace, bool) {
+	ns, ok := c.Namespaces[plugin]
+	if !ok {
+		return ns, false
+	}
+	if ns.RetentionDays <= 0 {
+		ns.RetentionDays = 10
+	}
+	if ns.MaxUploadMB <= 0 {
+		ns.MaxUploadMB = 25
+	}
+	if ns.MaxOutputMB <= 0 {
+		ns.MaxOutputMB = 512
+	}
+	return ns, true
+}
+
+// AllowsMIME reports whether mime is allowed for uploads ("*" or "image/*" style wildcards supported; empty list allows all).
+func (ns StorageNamespace) AllowsMIME(mime string) bool {
+	if len(ns.AllowedMIME) == 0 {
+		return true
+	}
+	for _, a := range ns.AllowedMIME {
+		if a == "*" || a == mime || (strings.HasSuffix(a, "/*") && strings.HasPrefix(mime, strings.TrimSuffix(a, "*"))) {
+			return true
+		}
+	}
+	return false
 }

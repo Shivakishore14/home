@@ -39,6 +39,8 @@ type Task struct {
 	LastHeartbeat *time.Time      `json:"last_heartbeat,omitempty"`
 	CreatedAt     time.Time       `json:"created_at"`
 	UpdatedAt     time.Time       `json:"updated_at"`
+	// Output holds plugin-reported result details (set on completion).
+	Output json.RawMessage `json:"output,omitempty"`
 }
 
 // Worker represents a registered worker node.
@@ -90,6 +92,8 @@ type LogChunkRequest struct {
 type CompleteTaskRequest struct {
 	OutputDetails map[string]interface{} `json:"output_details,omitempty"`
 	Message       string                 `json:"message,omitempty"`
+	// Files lists output file IDs (from POST /tasks/{id}/outputs) the worker uploaded.
+	Files []string `json:"files,omitempty"`
 }
 
 // FailTaskRequest payload sent by worker when task errors out.
@@ -131,4 +135,63 @@ type SSEEvent struct {
 	Type      string      `json:"type"`
 	Timestamp time.Time   `json:"timestamp"`
 	Data      interface{} `json:"data"`
+}
+
+// File kinds and statuses for stored objects.
+const (
+	FileKindUpload = "upload" // uploaded by a client, referenced from task params
+	FileKindOutput = "output" // produced by a worker for a task
+
+	FileStatusPending = "PENDING" // presigned, upload not yet confirmed
+	FileStatusReady   = "READY"
+	FileStatusExpired = "EXPIRED" // past retention; object deleted by bucket lifecycle
+)
+
+// File is a stored object (R2) tracked by the server.
+type File struct {
+	ID        string            `json:"id"`
+	Plugin    string            `json:"plugin"`
+	TaskID    string            `json:"task_id,omitempty"`
+	Kind      string            `json:"kind"`
+	ObjectKey string            `json:"-"`
+	Filename  string            `json:"filename"`
+	MIME      string            `json:"mime"`
+	Size      int64             `json:"size"`
+	Status    string            `json:"status"`
+	Meta      map[string]string `json:"meta,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
+	ExpiresAt time.Time         `json:"expires_at"`
+	URL       string            `json:"url,omitempty"` // presigned GET, only in responses
+}
+
+// PresignUploadRequest asks for an upload URL (client -> server).
+type PresignUploadRequest struct {
+	Plugin   string `json:"plugin"`
+	Filename string `json:"filename"`
+	MIME     string `json:"mime"`
+	Size     int64  `json:"size"`
+}
+
+// PresignOutputRequest asks for an output upload URL (worker -> server).
+type PresignOutputRequest struct {
+	Filename string            `json:"filename"`
+	MIME     string            `json:"mime"`
+	Size     int64             `json:"size"`
+	Meta     map[string]string `json:"meta,omitempty"`
+}
+
+// PresignResponse returns the new file ID and the request to upload it.
+type PresignResponse struct {
+	FileID  string            `json:"file_id"`
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers,omitempty"`
+	// ExpiresAt is when the upload URL stops working.
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// TaskDetail is a task plus its stored files (GET /api/v1/tasks/{id}).
+type TaskDetail struct {
+	Task
+	Files []File `json:"files"`
 }

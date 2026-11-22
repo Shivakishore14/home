@@ -16,6 +16,7 @@ import (
 	"taskengine/pkg/db"
 	"taskengine/pkg/models"
 	"taskengine/pkg/plugin"
+	"taskengine/pkg/storage"
 	"taskengine/web"
 )
 
@@ -35,6 +36,7 @@ type Server struct {
 
 	jellyfin *jellyfinNotifier
 	auth     *Auth
+	store    storage.Store
 }
 
 // NewServer initializes a new Server instance.
@@ -93,6 +95,9 @@ func (s *Server) setupRoutes() {
 
 	// SSE Real-time stream
 	s.route("GET /api/v1/events", accessClient, s.handleSSE)
+
+	// Object storage (presigned uploads/downloads)
+	s.storageRoutes()
 
 	// Embedded Static Assets
 	if staticFS, err := web.GetStaticFS(); err == nil {
@@ -193,11 +198,15 @@ func (s *Server) startBackgroundSweeper() {
 		}
 		ticker := time.NewTicker(time.Duration(interval) * time.Second)
 		defer ticker.Stop()
+		fileTicker := time.NewTicker(10 * time.Minute)
+		defer fileTicker.Stop()
 
 		for {
 			select {
 			case <-s.stopChan:
 				return
+			case <-fileTicker.C:
+				s.expireFiles(context.Background())
 			case <-ticker.C:
 				currentGlobal := s.cfg.GetGlobal()
 				timeout := currentGlobal.Server.HeartbeatTimeoutSeconds
@@ -408,6 +417,17 @@ func (s *Server) handleClaimTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mint download URLs for referenced input files
+	payload, err := s.injectInputURLs(r.Context(), task.Payload)
+	if err != nil {
+		msg := fmt.Sprintf("Input files unavailable: %v", err)
+		_ = s.db.FailTask(r.Context(), task.ID, msg, false)
+		s.Broadcast("task_failed", map[string]interface{}{"id": task.ID, "error_message": msg, "can_retry": false})
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	task.Payload = payload
+
 	// Path translation on target file before sending to worker
 	if task.TargetFile != "" {
 		task.TargetFile = s.cfg.TranslatePath(req.WorkerID, task.TargetFile)
@@ -472,7 +492,8 @@ func (s *Server) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
 		msg = "Task completed successfully"
 	}
 
-	if err := s.db.CompleteTask(r.Context(), taskID, msg); err != nil {
+	s.confirmOutputs(r.Context(), taskID, req.Files)
+	if err := s.db.CompleteTaskWithOutput(r.Context(), taskID, msg, req.OutputDetails); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -530,6 +551,10 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.PluginName == "" {
 		http.Error(w, "plugin_name is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.validateUploadRefs(r.Context(), req.PluginName, req.Params); err != nil {
+		http.Error(w, err.Error(), storageErrStatus(err))
 		return
 	}
 
@@ -609,8 +634,12 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(task)
+	files, err := s.taskFiles(r.Context(), task.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, models.TaskDetail{Task: *task, Files: files})
 }
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {

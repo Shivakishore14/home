@@ -21,6 +21,7 @@ import (
 	_ "taskengine/pkg/plugins/transcoder"
 	"taskengine/pkg/producer"
 	"taskengine/pkg/server"
+	"taskengine/pkg/storage"
 	"taskengine/pkg/worker"
 )
 
@@ -125,6 +126,16 @@ func runServer(args []string) {
 	defer database.Close()
 
 	srv := server.NewServer(cfgMgr, database, plugin.DefaultRegistry)
+	if r2cfg, ok := storage.R2ConfigFromEnv(); ok {
+		st, err := storage.NewR2(r2cfg)
+		if err != nil {
+			log.Fatalf("Failed to configure R2 storage: %v", err)
+		}
+		srv.SetStore(st)
+		log.Printf("[TaskEngine Server] Object storage enabled (R2 bucket %q)", r2cfg.Bucket)
+	} else {
+		log.Println("[TaskEngine Server] Object storage disabled (R2_* env not set)")
+	}
 	if srv.AuthEnabled() {
 		log.Println("[TaskEngine Server] Token auth enabled")
 	} else if *requireAuth || os.Getenv("TASKENGINE_REQUIRE_AUTH") == "true" {

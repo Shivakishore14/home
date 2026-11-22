@@ -105,8 +105,51 @@ func (d *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, plugin_name, priority DESC, created_at ASC);
 	CREATE INDEX IF NOT EXISTS idx_tasks_worker ON tasks(worker_id, status);
 	CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, updated_at DESC);
+
+	CREATE TABLE IF NOT EXISTS files (
+		id TEXT PRIMARY KEY,
+		plugin TEXT NOT NULL,
+		task_id TEXT,
+		kind TEXT NOT NULL CHECK (kind IN ('upload', 'output')),
+		object_key TEXT NOT NULL UNIQUE,
+		filename TEXT NOT NULL,
+		mime TEXT NOT NULL,
+		size INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL CHECK (status IN ('PENDING', 'READY', 'EXPIRED')),
+		meta TEXT NOT NULL DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		expires_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_files_task ON files(task_id, created_at);
+	CREATE INDEX IF NOT EXISTS idx_files_expiry ON files(status, expires_at);
 	`
-	_, err := d.db.Exec(schema)
+	if _, err := d.db.Exec(schema); err != nil {
+		return err
+	}
+	return d.addColumnIfMissing("tasks", "output", "TEXT NOT NULL DEFAULT ''")
+}
+
+// addColumnIfMissing adds a column to an existing table (SQLite has no
+// ADD COLUMN IF NOT EXISTS).
+func (d *DB) addColumnIfMissing(table, column, decl string) error {
+	rows, err := d.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	rows.Close()
+	_, err = d.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
 	return err
 }
 
@@ -153,20 +196,20 @@ func (d *DB) CreateTask(ctx context.Context, req models.CreateTaskRequest) (*mod
 // GetTask retrieves a single task by ID.
 func (d *DB) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	query := `
-	SELECT id, plugin_name, status, payload, target_file, worker_id, priority, progress, speed, status_message, log_output, retry_count, max_retries, claimed_at, last_heartbeat, created_at, updated_at
+	SELECT id, plugin_name, status, payload, target_file, worker_id, priority, progress, speed, status_message, log_output, retry_count, max_retries, claimed_at, last_heartbeat, created_at, updated_at, output
 	FROM tasks WHERE id = ?
 	`
 	row := d.db.QueryRowContext(ctx, query, id)
 
 	var t models.Task
-	var payloadStr string
+	var payloadStr, outputStr string
 	var targetFile, workerID, speed, statusMsg, logOut sql.NullString
 	var claimedAt, lastHb sql.NullTime
 
 	err := row.Scan(
 		&t.ID, &t.PluginName, &t.Status, &payloadStr, &targetFile, &workerID,
 		&t.Priority, &t.Progress, &speed, &statusMsg, &logOut,
-		&t.RetryCount, &t.MaxRetries, &claimedAt, &lastHb, &t.CreatedAt, &t.UpdatedAt,
+		&t.RetryCount, &t.MaxRetries, &claimedAt, &lastHb, &t.CreatedAt, &t.UpdatedAt, &outputStr,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -176,6 +219,9 @@ func (d *DB) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	}
 
 	t.Payload = json.RawMessage(payloadStr)
+	if outputStr != "" {
+		t.Output = json.RawMessage(outputStr)
+	}
 	if targetFile.Valid {
 		t.TargetFile = targetFile.String
 	}
@@ -400,16 +446,31 @@ func (d *DB) AppendTaskLog(ctx context.Context, id, logChunk string) error {
 
 // CompleteTask marks a task as COMPLETED.
 func (d *DB) CompleteTask(ctx context.Context, id, message string) error {
+	return d.CompleteTaskWithOutput(ctx, id, message, nil)
+}
+
+// CompleteTaskWithOutput marks a task as COMPLETED and stores its output
+// details (JSON object; nil leaves output empty).
+func (d *DB) CompleteTaskWithOutput(ctx context.Context, id, message string, output map[string]interface{}) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
+	outputJSON := ""
+	if len(output) > 0 {
+		b, err := json.Marshal(output)
+		if err != nil {
+			return fmt.Errorf("encode output: %w", err)
+		}
+		outputJSON = string(b)
+	}
 
 	now := time.Now().UTC()
 	query := `
 	UPDATE tasks
-	SET status = 'COMPLETED', progress = 100.0, status_message = ?, updated_at = ?
+	SET status = 'COMPLETED', progress = 100.0, status_message = ?, output = ?, updated_at = ?
 	WHERE id = ? AND status = 'RUNNING'
 	`
-	_, err := d.db.ExecContext(ctx, query, message, now, id)
+	_, err := d.db.ExecContext(ctx, query, message, outputJSON, now, id)
 	return err
 }
 

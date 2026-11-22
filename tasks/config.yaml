@@ -19,3 +19,20 @@ defaults:
       audio_bitrate: "192k"
       ffmpeg_binary: "ffmpeg"
       ffprobe_binary: "ffprobe"
+
+# Object storage (Cloudflare R2 bucket "taskengine"). Credentials come from the
+# server's environment (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
+# R2_BUCKET); without them storage is disabled. Keys are namespaced per plugin:
+#   <plugin>/in/<date>/<id>/<file>      client uploads
+#   <plugin>/out/<task_id>/<id>-<file>  task outputs
+# retention_days must mirror the bucket lifecycle rule for "<plugin>/".
+storage:
+  presign_put_ttl: "10m"
+  presign_get_ttl: "1h"
+  worker_get_ttl: "6h"
+  namespaces:
+    comfyui:
+      retention_days: 10
+      max_upload_mb: 25
+      max_output_mb: 512
+      allowed_mime: ["image/png", "image/jpeg", "image/webp"]
