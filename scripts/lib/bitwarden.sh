@@ -18,8 +18,11 @@
 BW_FOLDER="${BW_FOLDER:-Homelab}"
 export BITWARDENCLI_APPDATA_DIR="${HOMELAB_BW_DIR:-$HOME/.config/bitwarden-homelab}"
 mkdir -p "$BITWARDENCLI_APPDATA_DIR" && chmod 700 "$BITWARDENCLI_APPDATA_DIR"
-# Homebrew's bin is missing from non-login shells (e.g. ssh) on macOS.
-case ":$PATH:" in *:/opt/homebrew/bin:*) ;; *) [ -d /opt/homebrew/bin ] && PATH="$PATH:/opt/homebrew/bin" ;; esac
+# Non-login shells (e.g. ssh) may lack these; bw can live in either.
+for _d in "$HOME/.local/bin" /opt/homebrew/bin; do
+  case ":$PATH:" in *":$_d:"*) ;; *) [ -d "$_d" ] && PATH="$PATH:$_d" ;; esac
+done
+unset _d
 
 bw_installed() { command -v bw >/dev/null 2>&1; }
 
