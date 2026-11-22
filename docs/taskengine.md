@@ -18,6 +18,7 @@
 9. [Authentication](#-authentication)
 10. [Object Storage (Cloudflare R2)](#-object-storage-cloudflare-r2)
 11. [ComfyUI Plugin (`comfyui`)](#-comfyui-plugin-comfyui)
+12. [Task Callbacks (Webhooks)](#-task-callbacks-webhooks)
 
 ---
 
@@ -393,6 +394,34 @@ make worker-uninstall | producer-uninstall | comfyui-uninstall
 
 ---
 
+## 🔔 Task Callbacks (Webhooks)
+
+A client can ask to be called back when a task finishes instead of polling `GET /api/v1/tasks/{id}`:
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" -X POST $B/api/v1/tasks -d '{
+  "plugin_name": "comfyui",
+  "params": {"workflow": "jeveration_t2i", "inputs": {"prompt": "a red fox in snow"}},
+  "callback": {"url": "https://socialgrow.win/hooks/jobs/<job>/<token>", "ref": "job_123"}
+}'
+```
+
+* **When:** exactly once per final state: `task.completed`, `task.failed` (only when no retries are left, including worker timeouts) and `task.cancelled`. Retryable failures don't call back. A task that is retried by hand and finishes again calls back again.
+* **Who sends it:** the server, not the worker, so a crashed or sleeping worker still produces a `task.failed`.
+* **Body** (built at send time, so file URLs are freshly presigned for 1h on every attempt):
+  ```json
+  {"delivery_id":"…","event":"task.completed","task_id":"…","ref":"job_123","plugin_name":"comfyui",
+   "status":"COMPLETED","message":"…","output":{…plugin output…},
+   "files":[{"id":"…","filename":"jeveration_00013_.png","mime":"image/png","status":"READY","url":"https://…"}],
+   "occurred_at":"…"}
+  ```
+* **Signature:** headers `X-TaskEngine-Event`, `X-TaskEngine-Delivery`, `X-TaskEngine-Timestamp` (unix seconds) and `X-TaskEngine-Signature: sha256=<hex HMAC-SHA256(secret, timestamp + "." + raw body)>`. Receivers should check the signature with a constant-time compare, reject timestamps older than ~5 minutes, and treat `delivery_id` as an idempotency key (a delivery can repeat if the response is lost).
+* **Delivery:** the event is written to a `callbacks` outbox table in the same transaction that finishes the task, then sent by a background loop (immediately, then every 5s for due retries). Any 2xx is success. Other responses and network errors retry after 30s, 2m, 10m, 30m, 1h, 3h, 6h, 12h, then the callback is marked `FAILED`. `410 Gone` stops retries at once. Redirects are not followed.
+* **Policy:** the secret is the server env var `TASKENGINE_CALLBACK_SECRET` (without it, tasks with a callback get `503`). URLs must be `https` (plain `http` only for loopback) and their host must be listed in `tasks/config.yaml` → `callbacks.allowed_hosts`; the host is checked again before every attempt.
+* **Visibility:** `GET /api/v1/tasks/{id}` lists `callbacks` (status, attempts, last HTTP status and error). `POST /api/v1/callbacks/{id}/redeliver` queues one again with fresh retries.
+
+---
+
 ## 🔑 Secrets in Bitwarden
 
 Bitwarden (folder **Homelab**) is the source of truth for homelab secrets; the scripts read them with the `bw` CLI (`pacman -S bitwarden-cli` / `brew install bitwarden-cli`, then `bw login` once per machine).
@@ -416,7 +445,7 @@ Bitwarden (folder **Homelab**) is the source of truth for homelab secrets; the s
 * **Decoupled Architecture**: Media/Jellyfin server running on a separate host, TaskEngine server on Mac mini, and workers distributed across laptops, PCs, and microcontrollers.
 * **Webhook Integration**:
   * Ingress: Sonarr/Radarr triggers tasks immediately upon new media arrival.
-  * Egress: Automatically calls Jellyfin `/Library/Refresh` API when video transcoding completes.
+  * Egress: Automatically calls Jellyfin `/Library/Refresh` API when video transcoding completes. Per-task completion webhooks are done (see [Task Callbacks](#-task-callbacks-webhooks)).
 
 ### 2. ⚡ Generic IoT / Microcontroller Workers
 * Pure HTTP/JSON worker protocol allows ESP32, Raspberry Pi Pico W, and Arduino devices to act as distributed workers for:

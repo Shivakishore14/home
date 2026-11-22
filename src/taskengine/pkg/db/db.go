@@ -122,11 +122,33 @@ func (d *DB) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_files_task ON files(task_id, created_at);
 	CREATE INDEX IF NOT EXISTS idx_files_expiry ON files(status, expires_at);
+
+	-- Outbox of webhook calls: a row is written in the same transaction that
+	-- moves a task to a final state, so an event is never lost to a crash.
+	CREATE TABLE IF NOT EXISTS callbacks (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		event TEXT NOT NULL,
+		url TEXT NOT NULL,
+		ref TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL CHECK (status IN ('PENDING', 'DELIVERED', 'FAILED')),
+		attempts INTEGER NOT NULL DEFAULT 0,
+		last_status INTEGER NOT NULL DEFAULT 0,
+		last_error TEXT NOT NULL DEFAULT '',
+		next_attempt_at DATETIME NOT NULL,
+		created_at DATETIME NOT NULL,
+		delivered_at DATETIME
+	);
+	CREATE INDEX IF NOT EXISTS idx_callbacks_due ON callbacks(status, next_attempt_at);
+	CREATE INDEX IF NOT EXISTS idx_callbacks_task ON callbacks(task_id, created_at);
 	`
 	if _, err := d.db.Exec(schema); err != nil {
 		return err
 	}
-	return d.addColumnIfMissing("tasks", "output", "TEXT NOT NULL DEFAULT ''")
+	if err := d.addColumnIfMissing("tasks", "output", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return d.addColumnIfMissing("tasks", "callback", "TEXT NOT NULL DEFAULT ''")
 }
 
 // addColumnIfMissing adds a column to an existing table (SQLite has no
@@ -170,12 +192,21 @@ func (d *DB) CreateTask(ctx context.Context, req models.CreateTaskRequest) (*mod
 		payloadBytes = []byte("{}")
 	}
 
+	callbackJSON := ""
+	if req.Callback != nil && req.Callback.URL != "" {
+		b, err := json.Marshal(req.Callback)
+		if err != nil {
+			return nil, fmt.Errorf("encode callback: %w", err)
+		}
+		callbackJSON = string(b)
+	}
+
 	now := time.Now().UTC()
 	query := `
-	INSERT INTO tasks (id, plugin_name, status, payload, target_file, priority, max_retries, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO tasks (id, plugin_name, status, payload, target_file, priority, max_retries, callback, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	_, err := d.db.ExecContext(ctx, query, id, req.PluginName, models.StatusPending, string(payloadBytes), req.TargetFile, priority, maxRetries, now, now)
+	_, err := d.db.ExecContext(ctx, query, id, req.PluginName, models.StatusPending, string(payloadBytes), req.TargetFile, priority, maxRetries, callbackJSON, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert task: %w", err)
 	}
@@ -188,6 +219,7 @@ func (d *DB) CreateTask(ctx context.Context, req models.CreateTaskRequest) (*mod
 		TargetFile: req.TargetFile,
 		Priority:   priority,
 		MaxRetries: maxRetries,
+		Callback:   req.Callback,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}, nil
@@ -196,20 +228,20 @@ func (d *DB) CreateTask(ctx context.Context, req models.CreateTaskRequest) (*mod
 // GetTask retrieves a single task by ID.
 func (d *DB) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	query := `
-	SELECT id, plugin_name, status, payload, target_file, worker_id, priority, progress, speed, status_message, log_output, retry_count, max_retries, claimed_at, last_heartbeat, created_at, updated_at, output
+	SELECT id, plugin_name, status, payload, target_file, worker_id, priority, progress, speed, status_message, log_output, retry_count, max_retries, claimed_at, last_heartbeat, created_at, updated_at, output, callback
 	FROM tasks WHERE id = ?
 	`
 	row := d.db.QueryRowContext(ctx, query, id)
 
 	var t models.Task
-	var payloadStr, outputStr string
+	var payloadStr, outputStr, callbackStr string
 	var targetFile, workerID, speed, statusMsg, logOut sql.NullString
 	var claimedAt, lastHb sql.NullTime
 
 	err := row.Scan(
 		&t.ID, &t.PluginName, &t.Status, &payloadStr, &targetFile, &workerID,
 		&t.Priority, &t.Progress, &speed, &statusMsg, &logOut,
-		&t.RetryCount, &t.MaxRetries, &claimedAt, &lastHb, &t.CreatedAt, &t.UpdatedAt, &outputStr,
+		&t.RetryCount, &t.MaxRetries, &claimedAt, &lastHb, &t.CreatedAt, &t.UpdatedAt, &outputStr, &callbackStr,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -221,6 +253,12 @@ func (d *DB) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	t.Payload = json.RawMessage(payloadStr)
 	if outputStr != "" {
 		t.Output = json.RawMessage(outputStr)
+	}
+	if callbackStr != "" {
+		var cb models.TaskCallback
+		if json.Unmarshal([]byte(callbackStr), &cb) == nil {
+			t.Callback = &cb
+		}
 	}
 	if targetFile.Valid {
 		t.TargetFile = targetFile.String
@@ -470,8 +508,29 @@ func (d *DB) CompleteTaskWithOutput(ctx context.Context, id, message string, out
 	SET status = 'COMPLETED', progress = 100.0, status_message = ?, output = ?, updated_at = ?
 	WHERE id = ? AND status = 'RUNNING'
 	`
-	_, err := d.db.ExecContext(ctx, query, message, outputJSON, now, id)
-	return err
+	return d.finalize(ctx, id, models.EventTaskCompleted, query, message, outputJSON, now, id)
+}
+
+// finalize runs a status update that moves a task to a final state and, when
+// it changed a row and the task has a callback, queues the callback in the
+// same transaction. Callers hold d.mu.
+func (d *DB) finalize(ctx context.Context, taskID, event, query string, args ...interface{}) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		if err := enqueueCallback(ctx, tx, taskID, event); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // FailTask marks a task as FAILED or re-queues it if retries remain.
@@ -499,10 +558,9 @@ func (d *DB) FailTask(ctx context.Context, id, errorMessage string, canRetry boo
 	query := `
 	UPDATE tasks
 	SET status = 'FAILED', status_message = ?, updated_at = ?
-	WHERE id = ?
+	WHERE id = ? AND status IN ('PENDING', 'RUNNING')
 	`
-	_, err := d.db.ExecContext(ctx, query, errorMessage, now, id)
-	return err
+	return d.finalize(ctx, id, models.EventTaskFailed, query, errorMessage, now, id)
 }
 
 // CancelTask marks a pending or running task as CANCELLED.
@@ -516,8 +574,7 @@ func (d *DB) CancelTask(ctx context.Context, id string) error {
 	SET status = 'CANCELLED', status_message = 'Cancelled by user', updated_at = ?
 	WHERE id = ? AND status IN ('PENDING', 'RUNNING')
 	`
-	_, err := d.db.ExecContext(ctx, query, now, id)
-	return err
+	return d.finalize(ctx, id, models.EventTaskCancelled, query, now, id)
 }
 
 // RegisterWorker registers or updates a worker's heartbeat and capabilities.
@@ -625,6 +682,8 @@ func (d *DB) RecoverStaleTasks(ctx context.Context, timeoutSeconds int) (int, er
 			stale = append(stale, st)
 		}
 	}
+	// Release the connection before finalize opens a transaction (single-conn pool).
+	rows.Close()
 
 	recoveredCount := 0
 	now := time.Now().UTC()
@@ -639,7 +698,7 @@ func (d *DB) RecoverStaleTasks(ctx context.Context, timeoutSeconds int) (int, er
 				recoveredCount++
 			}
 		} else {
-			_, _ = d.db.ExecContext(ctx, `
+			_ = d.finalize(ctx, st.id, models.EventTaskFailed, `
 			UPDATE tasks
 			SET status = 'FAILED', status_message = 'Worker timed out; max retries exceeded', updated_at = ?
 			WHERE id = ? AND status = 'RUNNING'
