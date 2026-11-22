@@ -21,6 +21,8 @@ type Config struct {
 	TasksDir  string
 	Interval  time.Duration
 	Once      bool
+	// Token is a client token (creating tasks needs client access).
+	Token string
 }
 
 // Producer periodically scans local storage and dispatches discovered tasks to a remote server.
@@ -52,7 +54,7 @@ func New(cfg Config, registry *plugin.Registry) (*Producer, error) {
 		cfg:      cfg,
 		cfgMgr:   cfgMgr,
 		registry: registry,
-		client:   &http.Client{Timeout: 30 * time.Second, Transport: apiclient.Transport(cfg.ServerURL, apiclient.TokenFromEnv(), nil)},
+		client:   &http.Client{Timeout: 30 * time.Second, Transport: apiclient.Transport(cfg.ServerURL, cfg.Token, nil)},
 	}, nil
 }
 
@@ -157,6 +159,9 @@ func (p *Producer) sendTask(ctx context.Context, req models.CreateTaskRequest) (
 	}
 	if resp.StatusCode == http.StatusOK {
 		return false, nil // Skipped as duplicate
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		return false, fmt.Errorf("server returned 401: producer needs a client token ($TASKENGINE_PRODUCER_TOKEN)")
 	}
 	return false, fmt.Errorf("server returned status: %d", resp.StatusCode)
 }

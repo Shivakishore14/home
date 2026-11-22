@@ -199,7 +199,7 @@ func newFakeComfy(t *testing.T) *fakeComfy {
 
 func newPlugin(t *testing.T, url string) *Plugin {
 	p := New()
-	cfg, _ := json.Marshal(Config{URL: url, TimeoutMinutes: 1})
+	cfg, _ := json.Marshal(Config{URL: url, TimeoutMinutes: 1, StartupWaitSeconds: 1})
 	if err := p.Init(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -366,5 +366,26 @@ func TestComfyUIIsOptIn(t *testing.T) {
 	}
 	if _, ok := plugin.DefaultRegistry.GetWorkerPlugin(pluginName); !ok {
 		t.Fatal("comfyui must remain available when enabled explicitly")
+	}
+}
+
+func TestWaitsForComfyToStart(t *testing.T) {
+	comfy := newFakeComfy(t)
+	// Start "down": a proxy that refuses /system_stats for the first second.
+	start := time.Now()
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if time.Since(start) < time.Second {
+			http.Error(w, "starting", http.StatusServiceUnavailable)
+			return
+		}
+		comfy.srv.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer proxy.Close()
+
+	p := New()
+	cfg, _ := json.Marshal(Config{URL: proxy.URL, TimeoutMinutes: 1, StartupWaitSeconds: 30})
+	_ = p.Init(context.Background(), cfg)
+	if err := p.Execute(context.Background(), payload(`{"workflow":"test","inputs":{"prompt":"x"}}`), newIO()); err != nil {
+		t.Fatalf("should succeed once ComfyUI is up: %v", err)
 	}
 }

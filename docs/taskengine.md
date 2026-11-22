@@ -368,7 +368,7 @@ plugin_limits:
   comfyui: 1
 ```
 
-Plugin config (`plugin_configs.comfyui`): `url` (default `http://127.0.0.1:8188`), `assets_path`, `timeout_minutes`, `thumbnail_size` (`-1` disables).
+Plugin config (`plugin_configs.comfyui`): `url` (default `http://127.0.0.1:8188`), `assets_path`, `timeout_minutes`, `thumbnail_size` (`-1` disables), `startup_wait_seconds` (default 180).
 
 ---
 
@@ -377,10 +377,15 @@ Plugin config (`plugin_configs.comfyui`): `url` (default `http://127.0.0.1:8188`
 ```bash
 make worker-install WORKER_ID=rootpc     # Linux: systemd user unit taskengine-worker.service
 make worker-install WORKER_ID=macmini    # macOS: LaunchAgent com.home.taskengine-worker
-make worker-uninstall
+make producer-install                    # scans media and submits transcode tasks (Mac mini)
+make comfyui-install COMFYUI_DIR=/path/to/ComfyUI   # Linux: comfyui.service (root-pc)
+make worker-uninstall | producer-uninstall | comfyui-uninstall
 ```
 
-* First run prompts for the server URL and worker token and stores them in `~/.config/taskengine/worker.env` (mode 600), so neither ever lands in the repo. The token is checked against the server before anything is changed.
+* **Producer:** the server can't see the media drive, so the machine that has it (Mac mini) runs `taskengine producer`, which scans the `tasks/definitions` scanners (e.g. `_incoming`) every 60s (`PRODUCER_INTERVAL`) and submits tasks. Creating tasks needs a **client** token: add a dedicated one to the server's `TASKENGINE_CLIENT_TOKENS` and store it as `TASKENGINE_PRODUCER_TOKEN`.
+* **ComfyUI:** listens on `127.0.0.1:8188` (`COMFYUI_LISTEN` / `COMFYUI_PORT` to change); waits for its drive to be mounted and restarts on failure. If ComfyUI is already running by hand, the unit is enabled for next boot but not started. The `comfyui` plugin waits up to `startup_wait_seconds` (default 180) for ComfyUI before failing a task.
+
+* First run prompts for the server URL and tokens and stores them in `~/.config/taskengine/worker.env` (mode 600, read literally, never sourced), so none of them land in the repo. Tokens are checked against the server before anything is changed.
 * The binary is rebuilt from the checkout; rerun the target after `git pull` to deploy.
 * Plugins, concurrency and `plugin_limits` come from `tasks/workers/<id>.yaml` on the server.
 * **Linux** starts at boot when lingering is on (`loginctl enable-linger $USER`); an existing unmanaged unit is backed up first.

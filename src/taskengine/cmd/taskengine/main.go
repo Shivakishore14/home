@@ -282,6 +282,13 @@ func runProducer(args []string) {
 	once := fs.Bool("once", false, "Run single scan and exit")
 	_ = fs.Parse(args)
 
+	// Producers create tasks, which needs a client token. Prefer a dedicated
+	// variable so a machine can run a worker and a producer with different tokens.
+	token := strings.TrimSpace(os.Getenv("TASKENGINE_PRODUCER_TOKEN"))
+	if token == "" {
+		token = apiclient.TokenFromEnv()
+	}
+
 	resolvedTasksDir := *tasksDir
 	if _, err := os.Stat(resolvedTasksDir); os.IsNotExist(err) {
 		if _, err := os.Stat("../../tasks"); err == nil {
@@ -296,6 +303,7 @@ func runProducer(args []string) {
 		TasksDir:  resolvedTasksDir,
 		Interval:  *interval,
 		Once:      *once,
+		Token:     token,
 	}, plugin.DefaultRegistry)
 	if err != nil {
 		log.Fatalf("Failed to initialize producer: %v", err)

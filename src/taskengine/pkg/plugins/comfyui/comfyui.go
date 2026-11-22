@@ -51,6 +51,9 @@ type Config struct {
 	TimeoutMinutes int `json:"timeout_minutes"`
 	// ThumbnailSize is the max edge of generated JPEG thumbnails (default 384, 0 = default, -1 = off).
 	ThumbnailSize int `json:"thumbnail_size"`
+	// StartupWaitSeconds is how long a task waits for ComfyUI to come up
+	// (e.g. right after boot) before failing with a retryable error (default 180).
+	StartupWaitSeconds int `json:"startup_wait_seconds"`
 }
 
 // Plugin implements plugin.WorkerPlugin.
@@ -91,6 +94,9 @@ func (p *Plugin) Init(_ context.Context, raw json.RawMessage) error {
 	}
 	if cfg.ThumbnailSize == 0 {
 		cfg.ThumbnailSize = 384
+	}
+	if cfg.StartupWaitSeconds <= 0 {
+		cfg.StartupWaitSeconds = 180
 	}
 	p.mu.Lock()
 	p.cfg = cfg
@@ -147,10 +153,7 @@ func (p *Plugin) Execute(ctx context.Context, payload plugin.TaskPayload, report
 	defer cancel()
 	c := &client{base: cfg.URL, http: &http.Client{}}
 
-	pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
-	err = c.ping(pingCtx)
-	pingCancel()
-	if err != nil {
+	if err := waitForComfy(ctx, c, time.Duration(cfg.StartupWaitSeconds)*time.Second, status); err != nil {
 		return fmt.Errorf("ComfyUI not reachable at %s: %w", cfg.URL, err) // retryable
 	}
 
@@ -584,4 +587,30 @@ func compactJSON(v interface{}) string {
 		return string(b[:500]) + "…"
 	}
 	return string(b)
+}
+
+// waitForComfy polls ComfyUI until it answers or maxWait elapses, so tasks
+// claimed while ComfyUI is still starting (e.g. after a reboot) don't burn
+// their retries.
+func waitForComfy(ctx context.Context, c *client, maxWait time.Duration, status func(float64, string)) error {
+	deadline := time.Now().Add(maxWait)
+	for attempt := 0; ; attempt++ {
+		pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := c.ping(pingCtx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		if attempt == 0 {
+			status(0.5, "Waiting for ComfyUI to start")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(min(2*time.Second, time.Until(deadline)+10*time.Millisecond)):
+		}
+	}
 }

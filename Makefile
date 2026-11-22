@@ -109,6 +109,8 @@ help:
 	@echo "   make taskengine-worker  - Run TaskEngine in worker mode (SERVER_URL=... WORKER_ID=...)"
 	@echo "   make worker-install WORKER_ID=<id> - Install this machine's worker as a boot service (launchd/systemd)"
 	@echo "   make worker-uninstall   - Remove the worker boot service"
+	@echo "   make producer-install   - Install the task producer (scans media, submits transcode tasks)"
+	@echo "   make comfyui-install COMFYUI_DIR=<dir> - Run ComfyUI as a systemd user service (Linux)"
 	@echo "   make taskengine-reload  - Trigger hot configuration reload from tasks/"
 	@echo "   make taskengine-status  - View TaskEngine stats and active workers"
 	@echo "   make taskengine-e2e     - Run automated end-to-end integration test"
@@ -206,7 +208,24 @@ worker-install:
 
 .PHONY: worker-uninstall
 worker-uninstall:
-	@bash scripts/install-worker.sh uninstall
+	@bash scripts/install-worker.sh uninstall worker
+
+.PHONY: producer-install
+producer-install:
+	@bash scripts/install-worker.sh install-producer
+
+.PHONY: producer-uninstall
+producer-uninstall:
+	@bash scripts/install-worker.sh uninstall producer
+
+.PHONY: comfyui-install
+comfyui-install:
+	@if [ -z "$(COMFYUI_DIR)" ]; then echo "ERROR: set COMFYUI_DIR (path containing main.py and venv/)"; exit 1; fi
+	@bash scripts/install-worker.sh install-comfyui "$(COMFYUI_DIR)"
+
+.PHONY: comfyui-uninstall
+comfyui-uninstall:
+	@bash scripts/install-worker.sh uninstall comfyui
 
 .PHONY: taskengine-producer
 taskengine-producer: taskengine-build
