@@ -395,7 +395,9 @@ make worker-uninstall | producer-uninstall | comfyui-uninstall
 
 ## 🔑 Secrets in Bitwarden
 
-Bitwarden (folder **Homelab**) is the source of truth for homelab secrets; the scripts read them with the `bw` CLI (`pacman -S bitwarden-cli` / `brew install bitwarden-cli`, then `bw login` once per machine).
+Homelab secrets live in a **dedicated homelab Bitwarden account** (its own email, e.g. `you+homelab@gmail.com`, master password and two-step login), separate from your personal vault, in folder **Homelab**. Phone/browser/desktop apps can stay logged in to both accounts and switch between them.
+
+The scripts read it with the `bw` CLI (`pacman -S bitwarden-cli` / `brew install bitwarden-cli`) using their own CLI profile (`~/.config/bitwarden-homelab`), so they can never touch your personal vault. Log in once per machine with `make bitwarden-login`; use `scripts/hbw <command>` for other `bw` commands against the homelab account. Items are only looked up inside the Homelab folder.
 
 | Item | Fields |
 |---|---|

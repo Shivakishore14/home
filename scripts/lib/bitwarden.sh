@@ -9,8 +9,17 @@
 #
 # Unlocking asks for the master password with a hidden prompt; the session
 # key lives only in this process (BW_SESSION) and is never written to disk.
+#
+# The scripts use a dedicated *homelab* Bitwarden account (separate email and
+# master password from your personal vault). Its CLI state lives in its own
+# profile directory, so these scripts can never log in to or unlock your
+# personal vault; use scripts/hbw (make bitwarden-login) to manage it.
 
 BW_FOLDER="${BW_FOLDER:-Homelab}"
+export BITWARDENCLI_APPDATA_DIR="${HOMELAB_BW_DIR:-$HOME/.config/bitwarden-homelab}"
+mkdir -p "$BITWARDENCLI_APPDATA_DIR" && chmod 700 "$BITWARDENCLI_APPDATA_DIR"
+# Homebrew's bin is missing from non-login shells (e.g. ssh) on macOS.
+case ":$PATH:" in *:/opt/homebrew/bin:*) ;; *) [ -d /opt/homebrew/bin ] && PATH="$PATH:/opt/homebrew/bin" ;; esac
 
 bw_installed() { command -v bw >/dev/null 2>&1; }
 
@@ -34,7 +43,7 @@ bw_unlock() {
       [ -n "$session" ] || { echo "Bitwarden unlock failed" >&2; return 1; }
       export BW_SESSION="$session"
       ;;
-    unauthenticated) echo "Bitwarden: not logged in on this machine (run: bw login)" >&2; return 1 ;;
+    unauthenticated) echo "Bitwarden: homelab account not logged in on this machine (run: make bitwarden-login)" >&2; return 1 ;;
     *) echo "Bitwarden: cannot read vault status" >&2; return 1 ;;
   esac
   if [ -z "${_BW_SYNCED:-}" ]; then
@@ -43,9 +52,18 @@ bw_unlock() {
   fi
 }
 
-# bw_item_json NAME: the item with exactly this name (empty if none).
+# bw_folder_id: id of $BW_FOLDER (empty if it doesn't exist).
+bw_folder_id() {
+  bw list folders --session "$BW_SESSION" 2>/dev/null | python3 -c '
+import json, sys
+print(next((f["id"] for f in json.load(sys.stdin) if f.get("name") == sys.argv[1]), ""))' "$BW_FOLDER"
+}
+
+# bw_item_json NAME: the item with exactly this name in $BW_FOLDER (empty if none).
 bw_item_json() {
-  bw list items --search "$1" --session "$BW_SESSION" 2>/dev/null | python3 -c '
+  local folder; folder="$(bw_folder_id)"
+  [ -n "$folder" ] || return 0
+  bw list items --folderid "$folder" --search "$1" --session "$BW_SESSION" 2>/dev/null | python3 -c '
 import json, sys
 name = sys.argv[1]
 items = [i for i in json.load(sys.stdin) if i.get("name") == name]

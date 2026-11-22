@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Copy homelab secrets that already exist on this machine into Bitwarden
+# Copy homelab secrets that already exist on this machine into the homelab
+# Bitwarden account (see scripts/lib/bitwarden.sh)
 # (folder "Homelab"), so other machines and devices can get them from there.
 #
 #   scripts/bitwarden-import.sh      (make bitwarden-import)
