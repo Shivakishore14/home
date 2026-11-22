@@ -55,18 +55,49 @@ get_env() {
 }
 
 # require_env KEY PROMPT [secret]: read KEY, prompting and saving it if missing.
+# preview VALUE [secret]: full value, or a masked one for secrets (abcd…wxyz).
+preview() {
+  local v="$1"
+  if [ -z "${2:-}" ]; then printf '%s' "$v"
+  elif [ "${#v}" -ge 16 ]; then printf '%s…%s' "${v:0:4}" "${v: -4}"
+  else printf '****'; fi
+}
+
+# set_env KEY VALUE: replace KEY's line in the env file (mode 600).
+set_env() {
+  mkdir -p "$ENV_DIR"
+  local tmp
+  tmp="$(umask 077; mktemp "$ENV_DIR/.worker.env.XXXXXX")"
+  if [ -f "$ENV_FILE" ]; then grep -v "^$1=" "$ENV_FILE" > "$tmp" || true; fi
+  printf '%s=%s\n' "$1" "$2" >> "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$ENV_FILE"
+}
+
+# require_env KEY PROMPT [secret]: print KEY's value. In a terminal, always
+# asks, showing the stored value (masked for secrets) and keeping it on Enter;
+# without a terminal, uses the stored value. Prompts go to stderr because the
+# function runs inside $(...).
 require_env() {
-  local key="$1" prompt="$2" secret="${3:-}" value
-  value="$(get_env "$key")"
-  if [ -z "$value" ]; then
-    [ -t 0 ] || die "$key missing in $ENV_FILE (add '$key=...', mode 600) or rerun in a terminal to be prompted."
-    if [ -n "$secret" ]; then read -r -s -p "$prompt: " value; echo; else read -r -p "$prompt: " value; fi
-    [ -n "$value" ] || die "$key is required"
-    mkdir -p "$ENV_DIR"
-    (umask 077; printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE")
+  local key="$1" prompt="$2" secret="${3:-}" stored input
+  stored="$(get_env "$key")"
+  if [ -t 0 ]; then
+    if [ -n "$stored" ]; then
+      prompt="$prompt [$(preview "$stored" "$secret"), Enter to keep]"
+    fi
+    if [ -n "$secret" ]; then
+      read -r -s -p "$prompt: " input; echo >&2
+    else
+      read -r -p "$prompt: " input
+    fi
+    if [ -n "$input" ] && [ "$input" != "$stored" ]; then
+      set_env "$key" "$input"
+      stored="$input"
+    fi
   fi
+  [ -n "$stored" ] || die "$key missing in $ENV_FILE (add '$key=...', mode 600) or rerun in a terminal to be prompted."
   chmod 600 "$ENV_FILE"
-  printf '%s' "$value"
+  printf '%s' "$stored"
 }
 
 load_url() { TASKENGINE_URL="$(require_env TASKENGINE_URL "TaskEngine server URL (https://...)")"; TASKENGINE_URL="${TASKENGINE_URL%/}"; }
