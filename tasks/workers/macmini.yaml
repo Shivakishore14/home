@@ -1,0 +1,13 @@
+# Mac mini: transcoding worker only (the TaskEngine server runs on the VPS).
+# Installed as a boot-time LaunchAgent by scripts/install-macmini-worker.sh.
+# The media drive is local, so server paths need no translation.
+worker_id: "macmini"
+max_concurrent_tasks: 1
+enabled_plugins:
+  - "video-transcoder"
+scratch_dir: "~/.taskengine/scratch"
+plugin_configs:
+  video-transcoder:
+    target_codec: "h264_videotoolbox"
+    ffmpeg_binary: "/opt/homebrew/bin/ffmpeg"
+    ffprobe_binary: "/opt/homebrew/bin/ffprobe"
