@@ -358,6 +358,7 @@ func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 		WorkerID:           req.WorkerID,
 		MaxConcurrentTasks: wCfg.MaxConcurrentTasks,
 		EnabledPlugins:     wCfg.EnabledPlugins,
+		PluginLimits:       wCfg.PluginLimits,
 		ScratchDir:         wCfg.ScratchDir,
 		PathMappings:       wCfg.PathMappings,
 		PluginConfigs:      wCfg.PluginConfigs,

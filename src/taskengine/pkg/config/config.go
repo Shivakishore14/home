@@ -62,12 +62,15 @@ type GlobalConfig struct {
 
 // WorkerConfig represents per-worker overrides in tasks/workers/*.yaml.
 type WorkerConfig struct {
-	WorkerID           string                 `yaml:"worker_id"`
-	MaxConcurrentTasks int                    `yaml:"max_concurrent_tasks"`
-	EnabledPlugins     []string               `yaml:"enabled_plugins"`
-	ScratchDir         string                 `yaml:"scratch_dir"`
-	PathMappings       map[string]string      `yaml:"path_mappings"`
-	PluginConfigs      map[string]interface{} `yaml:"plugin_configs"`
+	WorkerID           string   `yaml:"worker_id"`
+	MaxConcurrentTasks int      `yaml:"max_concurrent_tasks"`
+	EnabledPlugins     []string `yaml:"enabled_plugins"`
+	// PluginLimits caps concurrent tasks per plugin within MaxConcurrentTasks
+	// (e.g. comfyui: 1 so GPU generation never runs more than one at a time).
+	PluginLimits  map[string]int         `yaml:"plugin_limits"`
+	ScratchDir    string                 `yaml:"scratch_dir"`
+	PathMappings  map[string]string      `yaml:"path_mappings"`
+	PluginConfigs map[string]interface{} `yaml:"plugin_configs"`
 }
 
 // TaskAssetsDefinition represents asset configuration in task definition YAML.
@@ -251,6 +254,9 @@ func (m *Manager) GetWorkerConfig(workerID string) WorkerConfig {
 		}
 		if len(w.EnabledPlugins) > 0 {
 			res.EnabledPlugins = w.EnabledPlugins
+		}
+		if len(w.PluginLimits) > 0 {
+			res.PluginLimits = w.PluginLimits
 		}
 		if w.ScratchDir != "" {
 			res.ScratchDir = w.ScratchDir

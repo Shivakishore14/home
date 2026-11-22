@@ -1,7 +1,12 @@
+# root-pc (RTX 4070): transcoding over the Mac mini SMB share + ComfyUI.
+# Installed as a systemd user service by `make worker-install WORKER_ID=rootpc`.
 worker_id: "rootpc"
 max_concurrent_tasks: 3
 enabled_plugins:
   - "video-transcoder"
+  - "comfyui"
+plugin_limits:
+  comfyui: 1  # ComfyUI runs prompts one at a time; transcodes use the other slots
 scratch_dir: "~/.cache/taskengine/scratch"  # on SSD; /tmp is RAM-backed tmpfs
 path_mappings:
   "/Volumes/drive001/media": "/mnt/macmini_media/media"
@@ -12,3 +17,7 @@ plugin_configs:
     crf: 21
     audio_bitrate: "192k"
     container: "mp4"
+  comfyui:
+    url: "http://127.0.0.1:8188"
+    timeout_minutes: 60
+    thumbnail_size: 384

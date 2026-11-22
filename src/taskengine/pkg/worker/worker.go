@@ -42,6 +42,9 @@ type Worker struct {
 	stopChan        chan struct{}
 	wg              sync.WaitGroup
 	semaphore       chan struct{}
+
+	runningMu sync.Mutex
+	running   map[string]int // in-flight tasks per plugin
 }
 
 // NewWorker initializes a worker instance.
@@ -49,6 +52,7 @@ func NewWorker(cfg Config, registry *plugin.Registry) *Worker {
 	if registry == nil {
 		registry = plugin.DefaultRegistry
 	}
+	cfg.ServerURL = strings.TrimRight(cfg.ServerURL, "/")
 	if cfg.Hostname == "" {
 		h, _ := os.Hostname()
 		cfg.Hostname = h
@@ -77,6 +81,7 @@ func NewWorker(cfg Config, registry *plugin.Registry) *Worker {
 		registry:       registry,
 		enabledPlugins: enabledPlugins,
 		stopChan:       make(chan struct{}),
+		running:        make(map[string]int),
 	}
 }
 
@@ -225,10 +230,12 @@ func (w *Worker) pollLoop(ctx context.Context) {
 				}
 
 				// Spawn task runner goroutine
+				w.trackStart(task.PluginName)
 				w.wg.Add(1)
 				go func(t *models.Task) {
 					defer w.wg.Done()
 					defer func() { <-w.semaphore }()
+					defer w.trackDone(t.PluginName)
 					w.runTask(ctx, t)
 				}(task)
 
@@ -240,13 +247,14 @@ func (w *Worker) pollLoop(ctx context.Context) {
 }
 
 func (w *Worker) claimTask(ctx context.Context) (*models.Task, error) {
-	if len(w.enabledPlugins) == 0 {
+	plugins := w.claimablePlugins()
+	if len(plugins) == 0 {
 		return nil, nil
 	}
 
 	reqBody := models.ClaimTaskRequest{
 		WorkerID: w.cfg.WorkerID,
-		Plugins:  w.enabledPlugins,
+		Plugins:  plugins,
 	}
 
 	data, _ := json.Marshal(reqBody)
@@ -479,4 +487,31 @@ func (r *httpProgressReporter) Report(ctx context.Context, report plugin.Progres
 	}
 
 	return nil
+}
+
+// claimablePlugins returns enabled plugins that are below their per-plugin
+// concurrency limit (plugin_limits in the worker config).
+func (w *Worker) claimablePlugins() []string {
+	w.runningMu.Lock()
+	defer w.runningMu.Unlock()
+	out := make([]string, 0, len(w.enabledPlugins))
+	for _, p := range w.enabledPlugins {
+		if limit, ok := w.effectiveConfig.PluginLimits[p]; ok && limit > 0 && w.running[p] >= limit {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func (w *Worker) trackStart(pluginName string) {
+	w.runningMu.Lock()
+	w.running[pluginName]++
+	w.runningMu.Unlock()
+}
+
+func (w *Worker) trackDone(pluginName string) {
+	w.runningMu.Lock()
+	w.running[pluginName]--
+	w.runningMu.Unlock()
 }

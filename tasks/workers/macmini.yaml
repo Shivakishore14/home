@@ -1,5 +1,5 @@
 # Mac mini: transcoding worker only (the TaskEngine server runs on the VPS).
-# Installed as a boot-time LaunchAgent by scripts/install-macmini-worker.sh.
+# Installed as a boot-time LaunchAgent by `make worker-install WORKER_ID=macmini`.
 # The media drive is local, so server paths need no translation.
 worker_id: "macmini"
 max_concurrent_tasks: 1

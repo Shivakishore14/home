@@ -358,14 +358,33 @@ curl -s -H "Authorization: Bearer $TOKEN" -X POST $B/api/v1/tasks \
 
 ### Running the worker (root-pc)
 
-A dedicated worker process (`tasks/workers/rootpc-comfy.yaml`, concurrency 1) connects to the public VPS server, alongside the existing `rootpc` worker that serves the Mac mini:
+`comfyui` is **opt-in**: workers only run it when it is listed explicitly (`enabled_plugins` or `--plugins`), so machines without ComfyUI never claim its tasks. root-pc runs one `rootpc` worker for both transcoding and ComfyUI, with `plugin_limits` keeping ComfyUI to one task at a time:
 
-```bash
-TASKENGINE_URL=https://<your-taskengine-host> TASKENGINE_TOKEN=<worker token> make taskengine-comfy-worker
-# = taskengine worker --server-url $TASKENGINE_URL --worker-id rootpc-comfy
+```yaml
+# tasks/workers/rootpc.yaml
+max_concurrent_tasks: 3
+enabled_plugins: ["video-transcoder", "comfyui"]
+plugin_limits:
+  comfyui: 1
 ```
 
 Plugin config (`plugin_configs.comfyui`): `url` (default `http://127.0.0.1:8188`), `assets_path`, `timeout_minutes`, `thumbnail_size` (`-1` disables).
+
+---
+
+## 🚀 Installing Workers as Boot Services
+
+```bash
+make worker-install WORKER_ID=rootpc     # Linux: systemd user unit taskengine-worker.service
+make worker-install WORKER_ID=macmini    # macOS: LaunchAgent com.home.taskengine-worker
+make worker-uninstall
+```
+
+* First run prompts for the server URL and worker token and stores them in `~/.config/taskengine/worker.env` (mode 600), so neither ever lands in the repo. The token is checked against the server before anything is changed.
+* The binary is rebuilt from the checkout; rerun the target after `git pull` to deploy.
+* Plugins, concurrency and `plugin_limits` come from `tasks/workers/<id>.yaml` on the server.
+* **Linux** starts at boot when lingering is on (`loginctl enable-linger $USER`); an existing unmanaged unit is backed up first.
+* **macOS** starts at login (enable auto-login for boot start) through `~/.local/bin/taskengine-launcher` so Full Disk Access survives rebuilds, and retires the old local `com.home.taskengine-server` agent.
 
 ---
 

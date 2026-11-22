@@ -64,6 +64,7 @@ type RegisterWorkerResponse struct {
 	WorkerID           string                 `json:"worker_id"`
 	MaxConcurrentTasks int                    `json:"max_concurrent_tasks"`
 	EnabledPlugins     []string               `json:"enabled_plugins,omitempty"`
+	PluginLimits       map[string]int         `json:"plugin_limits,omitempty"`
 	ScratchDir         string                 `json:"scratch_dir,omitempty"`
 	PathMappings       map[string]string      `json:"path_mappings"`
 	PluginConfigs      map[string]interface{} `json:"plugin_configs"`
