@@ -342,12 +342,17 @@ func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.db.RegisterWorker(r.Context(), req.WorkerID, req.Hostname, req.EnabledPlugins); err != nil {
+	// Record the plugins the worker will actually claim: the server-side
+	// worker config overrides whatever the worker reports.
+	wCfg := s.cfg.GetWorkerConfig(req.WorkerID)
+	plugins := req.EnabledPlugins
+	if len(wCfg.EnabledPlugins) > 0 {
+		plugins = wCfg.EnabledPlugins
+	}
+	if err := s.db.RegisterWorker(r.Context(), req.WorkerID, req.Hostname, plugins); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	wCfg := s.cfg.GetWorkerConfig(req.WorkerID)
 	global := s.cfg.GetGlobal()
 	hbInterval := global.Server.HeartbeatTimeoutSeconds / 3
 	if hbInterval < 5 {

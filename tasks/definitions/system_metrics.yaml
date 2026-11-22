@@ -1,7 +1,7 @@
 name: "system-metrics-reporter"
 plugin_name: "command-runner"
 schedule: "*/10 * * * *"
-enabled: true
+enabled: false  # no worker runs command-runner since the server moved to the VPS
 priority: 5
 
 prerequisites:

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -102,5 +103,20 @@ func TestDashboardRedirectAndCookieLogin(t *testing.T) {
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("cookie auth: got %d", rr.Code)
+	}
+}
+
+func TestRegisterRecordsConfiguredPlugins(t *testing.T) {
+	srv, database, cfgMgr, cleanup := setupTestServer(t)
+	defer cleanup()
+	srv.SetAuth(NewAuth(nil, nil))
+	_ = cfgMgr
+	// No server-side config: the worker's own list is recorded.
+	if rr := doReq(t, srv.Handler(), "POST", "/api/v1/workers/register", "", `{"worker_id":"x","enabled_plugins":["a","b"]}`); rr.Code != 200 {
+		t.Fatalf("register: %d", rr.Code)
+	}
+	ws, _ := database.ListWorkers(context.Background())
+	if len(ws) != 1 || len(ws[0].EnabledPlugins) != 2 {
+		t.Fatalf("workers = %+v", ws)
 	}
 }
