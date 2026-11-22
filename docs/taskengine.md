@@ -393,25 +393,6 @@ make worker-uninstall | producer-uninstall | comfyui-uninstall
 
 ---
 
-## 🔑 Secrets in Bitwarden
-
-Homelab secrets live in a **dedicated homelab Bitwarden account** (its own email, e.g. `you+homelab@gmail.com`, master password and two-step login), separate from your personal vault, in folder **Homelab**. Phone/browser/desktop apps can stay logged in to both accounts and switch between them.
-
-The scripts read it with the `bw` CLI (`pacman -S bitwarden-cli` / `brew install bitwarden-cli`) using their own CLI profile (`~/.config/bitwarden-homelab`), so they can never touch your personal vault. Log in once per machine with `make bitwarden-login`; use `scripts/hbw <command>` for other `bw` commands against the homelab account. Items are only looked up inside the Homelab folder.
-
-| Item | Fields |
-|---|---|
-| `TaskEngine` (login) | URI = server URL, password = API key, hidden `worker_token` |
-| `Cloudflare R2` (note) | hidden `account_id`, `access_key_id`, `secret_access_key`, `bucket` |
-
-* `make bitwarden-import` copies whatever exists on the machine (`~/.config/taskengine/worker.env`, repo `.env.local`) into those items; changed values are shown masked and need confirmation.
-* `make worker-install` / `make producer-install` take missing values from Bitwarden (one master-password prompt, session kept in memory only) and cache them in `worker.env` for boot. After rotating a secret in Bitwarden: `BW_REFRESH=1 make worker-install WORKER_ID=...`.
-* `make r2-test` runs the R2 integration test with keys from Bitwarden (falls back to `.env.local`), so `.env.local` can be deleted once imported.
-* Coolify keeps its own copy of the server's env vars; update it from Bitwarden when rotating.
-* Secrets are passed to `bw` via stdin/env, never as command-line arguments.
-
----
-
 ## 🔮 Future Extensions & Roadmap
 
 ### 1. 🌐 Dedicated Multi-Host Topology & Webhooks

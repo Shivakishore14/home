@@ -13,14 +13,11 @@
 #   Linux: systemd user units taskengine-{worker,producer}.service and
 #          comfyui.service (start at boot with lingering: loginctl enable-linger $USER).
 #
-# Server URL and tokens come from Bitwarden (item "TaskEngine": URI, password =
-# API key, hidden field worker_token) when the `bw` CLI is set up, or are
-# prompted for. They are cached in ~/.config/taskengine/worker.env (mode 600)
-# because services need them at boot; never written to the repo:
+# Server URL and tokens live in ~/.config/taskengine/worker.env (mode 600),
+# prompted for on first use and never written to the repo:
 #   TASKENGINE_URL=https://...
 #   TASKENGINE_TOKEN=...            worker token (workers)
 #   TASKENGINE_PRODUCER_TOKEN=...   API key / client token (producer creates tasks)
-# After rotating a secret in Bitwarden, rerun with BW_REFRESH=1.
 set -euo pipefail
 
 ACTION="${1:-}"
@@ -42,9 +39,6 @@ usage() {
   exit 2
 }
 
-# shellcheck source=lib/bitwarden.sh
-. "$REPO/scripts/lib/bitwarden.sh"
-
 # ---------------------------------------------------------------- env file
 
 # get_env KEY: value of KEY from the env file, parsed literally (never sourced).
@@ -60,6 +54,7 @@ get_env() {
   done < "$ENV_FILE"
 }
 
+# require_env KEY PROMPT [secret]: read KEY, prompting and saving it if missing.
 # preview VALUE [secret]: full value, or a masked one for secrets (abcd...wxyz).
 preview() {
   local v="$1"
@@ -79,61 +74,30 @@ set_env() {
   mv "$tmp" "$ENV_FILE"
 }
 
-# Where each value lives in Bitwarden (item:field; see scripts/lib/bitwarden.sh).
-BW_ITEM="${BW_ITEM:-TaskEngine}"
-bw_source() {
-  case "$1" in
-    TASKENGINE_URL) echo "$BW_ITEM:uri" ;;
-    TASKENGINE_TOKEN) echo "$BW_ITEM:worker_token" ;;
-    TASKENGINE_PRODUCER_TOKEN) echo "$BW_ITEM:password" ;;
-  esac
-}
-
-# bw_prepare KEY...: unlock Bitwarden once in this (parent) process if any of
-# KEYs must come from it: not stored yet, or BW_REFRESH=1 (after rotating a
-# secret). Values are later read in $(...) subshells, which inherit BW_SESSION.
-bw_prepare() {
-  BW_OK=""
-  bw_installed || return 0
-  local k need="${BW_REFRESH:-}"
-  for k in "$@"; do [ -n "$(get_env "$k")" ] || need=1; done
-  [ -n "$need" ] || return 0
-  if bw_unlock; then BW_OK=1; else echo "    (continuing without Bitwarden)" >&2; fi
-}
-
-# require_env KEY PROMPT [secret]: print KEY's value.
-#   default = stored value; if missing (or BW_REFRESH=1) and Bitwarden is
-#   unlocked, the Bitwarden value instead.
-#   In a terminal: always asks, showing the default (masked for secrets) and
-#   keeping it on Enter. Without a terminal: uses the default.
-# Prompts go to stderr because the function runs inside $(...).
+# require_env KEY PROMPT [secret]: print KEY's value. In a terminal, always
+# asks, showing the stored value (masked for secrets) and keeping it on Enter;
+# without a terminal, uses the stored value. Prompts go to stderr because the
+# function runs inside $(...).
 require_env() {
-  local key="$1" prompt="$2" secret="${3:-}" value source="stored" input spec bwv
-  value="$(get_env "$key")"
-  if [ -n "${BW_OK:-}" ] && { [ -z "$value" ] || [ -n "${BW_REFRESH:-}" ]; }; then
-    spec="$(bw_source "$key")"
-    bwv="$(bw_field "${spec%%:*}" "${spec#*:}" 2>/dev/null || true)"
-    if [ -n "$bwv" ]; then
-      value="$bwv"; source="Bitwarden"
-    else
-      echo "    (Bitwarden item '${spec%%:*}' has no '${spec#*:}')" >&2
-    fi
-  fi
+  local key="$1" prompt="$2" secret="${3:-}" stored input
+  stored="$(get_env "$key")"
   if [ -t 0 ]; then
-    if [ -n "$value" ]; then
-      prompt="$prompt [$source: $(preview "$value" "$secret"), Enter to keep]"
+    if [ -n "$stored" ]; then
+      prompt="$prompt [$(preview "$stored" "$secret"), Enter to keep]"
     fi
     if [ -n "$secret" ]; then
       read -r -s -p "$prompt: " input; echo >&2
     else
       read -r -p "$prompt: " input
     fi
-    [ -z "$input" ] || value="$input"
+    if [ -n "$input" ] && [ "$input" != "$stored" ]; then
+      set_env "$key" "$input"
+      stored="$input"
+    fi
   fi
-  [ -n "$value" ] || die "$key missing: store it in Bitwarden ($(bw_source "$key")), in $ENV_FILE, or rerun in a terminal to be prompted."
-  [ "$value" = "$(get_env "$key")" ] || set_env "$key" "$value"
+  [ -n "$stored" ] || die "$key missing in $ENV_FILE (add '$key=...', mode 600) or rerun in a terminal to be prompted."
   chmod 600 "$ENV_FILE"
-  printf '%s' "$value"
+  printf '%s' "$stored"
 }
 
 load_url() { TASKENGINE_URL="$(require_env TASKENGINE_URL "TaskEngine server URL (https://...)")"; TASKENGINE_URL="${TASKENGINE_URL%/}"; }
@@ -295,7 +259,6 @@ install_worker() {
   local id="$1"
   [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] || die "invalid worker id '$id'"
   [ -f "$REPO/tasks/workers/$id.yaml" ] || echo "WARN: no tasks/workers/$id.yaml; the worker will run default (non-opt-in) plugins"
-  bw_prepare TASKENGINE_URL TASKENGINE_TOKEN
   load_url
   local token; token="$(require_env TASKENGINE_TOKEN "Worker token" secret)"
   verify_worker_token "$token"
@@ -314,7 +277,6 @@ install_worker() {
 }
 
 install_producer() {
-  bw_prepare TASKENGINE_URL TASKENGINE_PRODUCER_TOKEN
   load_url
   local token; token="$(require_env TASKENGINE_PRODUCER_TOKEN "Producer token (your API key or another client token)" secret)"
   verify_client_token "$token"
